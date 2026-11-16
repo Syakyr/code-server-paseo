@@ -100,15 +100,18 @@ jobs:
           default_branch="${DEFAULT_BRANCH:-${REF#refs/heads/}}"
           short="${SHORT_SHA:0:7}"
           paseo="paseo-${{ steps.pins.outputs.paseo_version }}"
-          pi="pi-${{ steps.pins.outputs.pi_version }}"
+          pi_tag="pi-${{ steps.pins.outputs.pi_version }}"
           csbase="cs-${{ steps.pins.outputs.cs_short }}"
-          pairing="${paseo}-${pi}-${csbase}"
+          # The pairing must be byte-identical to the release tag and to what
+          # watch.yml probes for, or the watcher never finds its own image and
+          # rebuilds the same pairing forever.
+          pairing="${paseo}-pi${{ steps.pins.outputs.pi_version }}-${csbase}"
           out=()
           push=no
           case "$REF_TYPE" in
             tag)
               push=yes
-              out+=("$paseo" "$csbase" "$pairing")
+              out+=("$paseo" "$pi_tag" "$csbase" "$pairing")
               ;;
             branch)
               if [ "$EVENT" = "pull_request" ]; then
@@ -120,13 +123,13 @@ jobs:
                 if [ "$REF" = "refs/heads/${default_branch}" ]; then
                   out+=("latest")
                 fi
-                out+=("dev" "dev-${short}" "$paseo" "$pi" "$csbase" "$pairing")
+                out+=("dev" "dev-${short}" "$paseo" "$pi_tag" "$csbase" "$pairing")
               fi
               ;;
             *)
               # workflow_dispatch and anything else: immutable pairing tags only.
               push=yes
-              out+=("$paseo" "$csbase" "$pairing")
+              out+=("$paseo" "$pi_tag" "$csbase" "$pairing")
               ;;
           esac
           # Repeated `key=` lines in $GITHUB_OUTPUT overwrite each other, so the
