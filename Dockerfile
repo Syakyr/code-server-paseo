@@ -18,6 +18,29 @@
 # already runs before it execs code-server (coder/code-server#5177). No
 # supervisor is added and code-server stays PID 1 under dumb-init.
 
+# Pinned by .github/workflows/watch.yml to the newest @getpaseo/cli release.
+# Global so both stages see one source of truth.
+ARG PASEO_VERSION=0.16.0
+
+# Paseo is a Node CLI and the code-server image deliberately has no node or npm
+# on PATH (it keeps its own at /usr/lib/code-server/lib/node). Install in a
+# throwaway node stage, then copy the tree across and point a `node` symlink at
+# the node code-server already ships, so the image gains no second runtime.
+ARG NODE_IMAGE=node:24-bookworm-slim
+FROM ${NODE_IMAGE} AS pack
+
+ARG PASEO_VERSION
+# The Paseo server tree pulls an optional onnxruntime native dep that downloads
+# at install time. The official Paseo image skips it the same way.
+ENV ONNXRUNTIME_NODE_INSTALL=skip
+
+RUN set -eux; \
+    test -n "${PASEO_VERSION}" || { echo "PASEO_VERSION build-arg is required"; exit 1; }; \
+    npm install -g --prefix /opt/paseo --no-fund --no-audit "@getpaseo/cli@${PASEO_VERSION}"; \
+    installed="$(node -p "require('/opt/paseo/lib/node_modules/@getpaseo/cli/package.json').version")"; \
+    test "${installed}" = "${PASEO_VERSION}"; \
+    npm cache clean --force
+
 ARG CODE_SERVER_IMAGE=codercom/code-server
 ARG CODE_SERVER_TAG=resolute
 # Digest of the multi-arch index that CODE_SERVER_TAG pointed at when this pin
@@ -27,40 +50,35 @@ ARG CODE_SERVER_DIGEST=sha256:e63d49eee8a142443227642faeaf63b61ced12916a611695db
 ARG CODE_SERVER_REF=${CODE_SERVER_IMAGE}@${CODE_SERVER_DIGEST}
 FROM ${CODE_SERVER_REF}
 
-# Pinned by .github/workflows/watch.yml to the newest @getpaseo/cli release.
-ARG PASEO_VERSION=0.16.0
-# The Paseo server tree pulls an optional onnxruntime native dep that downloads
-# at install time. The official Paseo image skips it the same way.
-ENV ONNXRUNTIME_NODE_INSTALL=skip
-
+ARG PASEO_VERSION
 USER root
 
+# /opt/paseo is self-contained (npm's bin symlinks are relative), so it lives
+# outside code-server's own trees. `node` on PATH is what the `paseo` shebang
+# (`/usr/bin/env -S node --disable-warning=DEP0040`) resolves, and code-server's
+# bundled node is the runtime the image already ships and runs on.
+COPY --from=pack /opt/paseo /opt/paseo
 RUN set -eux; \
-    test -n "${PASEO_VERSION}" || { echo "PASEO_VERSION build-arg is required"; exit 1; }; \
-    npm install -g --no-fund --no-audit "@getpaseo/cli@${PASEO_VERSION}"; \
-    installed="$(npm ls -g --depth=0 2>/dev/null | grep -oE '@getpaseo/cli@[0-9][^ ]*' || true)"; \
-    test "${installed}" = "@getpaseo/cli@${PASEO_VERSION}"; \
-    command -v paseo; \
-    npm cache clean --force
+    test -x /usr/lib/code-server/lib/node; \
+    ln -sf /usr/lib/code-server/lib/node /usr/local/bin/node; \
+    ln -sf /opt/paseo/bin/paseo /usr/local/bin/paseo; \
+    node --version; \
+    paseo --version | grep -q "${PASEO_VERSION}"
 
 # License texts come from the trees already in the image rather than vendored
 # copies, so they cannot drift from what is actually shipped.
 COPY NOTICE /usr/share/licenses/code-server-paseo/NOTICE
-RUN set -eux; \
-    dest=/usr/share/licenses/code-server-paseo; \
-    mkdir -p "$dest/licenses"; \
-    root="$(npm root -g)"; \
-    test -f "$root/@getpaseo/cli/LICENSE"; \
-    cp "$root/@getpaseo/cli/LICENSE" "$dest/licenses/paseo-LICENSE"; \
-    test -f /usr/lib/code-server/LICENSE; \
-    cp /usr/lib/code-server/LICENSE "$dest/licenses/code-server-LICENSE"
-
 COPY entrypoint.d/90-paseo /entrypoint.d/90-paseo
 COPY healthcheck /usr/local/bin/paseo-healthcheck
 RUN set -eux; \
+    dest=/usr/share/licenses/code-server-paseo; \
+    mkdir -p "$dest/licenses"; \
+    test -s "$dest/NOTICE"; \
+    test -s /opt/paseo/lib/node_modules/@getpaseo/cli/LICENSE; \
+    cp /opt/paseo/lib/node_modules/@getpaseo/cli/LICENSE "$dest/licenses/paseo-LICENSE"; \
+    test -s /usr/lib/code-server/LICENSE; \
+    cp /usr/lib/code-server/LICENSE "$dest/licenses/code-server-LICENSE"; \
     chmod 0755 /entrypoint.d/90-paseo /usr/local/bin/paseo-healthcheck; \
-    # The hook directory is created by the base image entrypoint only if it
-    # exists; make sure it does and holds exactly our script.
     ls -l /entrypoint.d/
 
 # Loopback by default: reachable from inside the workspace (Coder's coder_app,

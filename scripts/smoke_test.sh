@@ -5,7 +5,7 @@
 #   scripts/smoke_test.sh <image> [paseo_version]
 #
 # Runs against $DOCKER (default: docker). Covers:
-#   1. the exact pinned @getpaseo/cli version is installed (not "some" version)
+#   1. paseo runs and reports the exact pinned version (not "some" version)
 #   2. code-server is still present and reports a version
 #   3. the entrypoint hook is in place and executable
 #   4. license texts ship inside the image
@@ -42,15 +42,13 @@ wait_http() { # url attempts -> sets CODE
 echo "== $IMAGE =="
 
 # 1. exact pinned version ----------------------------------------------------
-installed="$("$DOCKER" run --rm --entrypoint sh "$IMAGE" -c \
-    "npm ls -g --depth=0 2>/dev/null | grep -oE '@getpaseo/cli@[0-9][^ ]*' || true")"
-[ -n "$installed" ] || fail "no @getpaseo/cli in the global npm tree"
+installed="$("$DOCKER" run --rm --entrypoint paseo "$IMAGE" --version 2>&1 | tail -1)"
+echo "  paseo --version: $installed"
 if [ -n "$PASEO_VERSION" ]; then
-    [ "$installed" = "@getpaseo/cli@${PASEO_VERSION}" ] ||
-        fail "expected @getpaseo/cli@${PASEO_VERSION}, got ${installed}"
+    [ "${installed#v}" = "${PASEO_VERSION}" ] ||
+        fail "expected paseo ${PASEO_VERSION}, got ${installed}"
 fi
-echo "  installed: $installed"
-pass "paseo CLI installed at the expected version"
+pass "paseo CLI runs and reports the expected version"
 
 # 2. code-server still there -------------------------------------------------
 out="$("$DOCKER" run --rm --entrypoint code-server "$IMAGE" --version 2>&1 | head -1)"

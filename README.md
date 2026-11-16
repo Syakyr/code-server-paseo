@@ -45,7 +45,7 @@ docker run -d --name workspace \
 code-server on `:10101`, Paseo on `:10102`. See [compose.yml](compose.yml) for a
 version with a persistent Linuxbrew tree and your code mounted in.
 
-## The two gotchas
+## Gotchas
 
 **`PASEO_LISTEN` defaults to `127.0.0.1:6767`.** Correct when Paseo is reached from
 inside the container (a Coder `coder_app`, `localhost`), wrong for a published port —
@@ -53,6 +53,13 @@ you get a container that looks healthy and a connection refused. Set
 `PASEO_LISTEN=0.0.0.0:6767` when you publish `6767`, and then set `PASEO_PASSWORD`:
 the daemon accepts unauthenticated control connections from anything that can reach
 it.
+
+**There is no `npm` in this image, and `node` is code-server's own.** The base image
+keeps Node at `/usr/lib/code-server/lib/node` and ships no npm. The build installs
+Paseo in a throwaway `node` stage and symlinks `/usr/local/bin/node` at code-server's
+binary, so `paseo` resolves its shebang without the image carrying a second runtime.
+If you want npm for your own work, install it the way you already do (Linuxbrew, or
+`nvm`) — it will land ahead of `/usr/local/bin` on `PATH` and shadow nothing.
 
 **Paseo's agent CLIs are not in this image.** `pi`, `claude`, `codex` and friends come
 from whatever you mount or install. The intended pattern is a persistent Linuxbrew
