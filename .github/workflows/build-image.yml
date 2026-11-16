@@ -35,15 +35,11 @@ permissions:
   contents: read
   packages: write
 
-env:
-  # github.repository carries the owner's login casing ("Syakyr/..."), and
-  # registry repository names must be lowercase or buildx refuses the tag.
-  IMAGE: ghcr.io/${{ toLower(github.repository) }}
-
 jobs:
   resolve:
     runs-on: ubuntu-latest
     outputs:
+      image: ${{ steps.pins.outputs.image }}
       paseo_version: ${{ steps.pins.outputs.paseo_version }}
       cs_digest: ${{ steps.pins.outputs.cs_digest }}
       cs_short: ${{ steps.pins.outputs.cs_short }}
@@ -62,7 +58,7 @@ jobs:
           arg() { sed -n -E "s|^ARG $1=(.*)$|\1|p" Dockerfile | head -1; }
           paseo="${INPUT_PASEO:-$(arg PASEO_VERSION)}"
           digest="${INPUT_DIGEST:-$(arg CODE_SERVER_DIGEST)}"
-          image="$(arg CODE_SERVER_IMAGE)"
+          image_used="$(arg CODE_SERVER_IMAGE)"
           tag="$(arg CODE_SERVER_TAG)"
           [ -n "$paseo" ]  || { echo "PASEO_VERSION missing from Dockerfile" >&2; exit 1; }
           [ -n "$digest" ] || { echo "CODE_SERVER_DIGEST missing from Dockerfile" >&2; exit 1; }
@@ -72,10 +68,13 @@ jobs:
             echo "paseo_version=$paseo"
             echo "cs_digest=$digest"
             echo "cs_short=$short"
-            echo "cs_ref=${image}@${digest}"
+            echo "cs_ref=${image_used}@${digest}"
             echo "cs_tag=${tag}"
+            # github.repository keeps the owner login casing; registry names
+            # must be lowercase and GitHub expressions have no toLower().
+            echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
           } >> "$GITHUB_OUTPUT"
-          echo "Building Paseo ${paseo} on ${image}:${tag} @ ${short}"
+          echo "Building Paseo ${paseo} on ${image_used}:${tag} @ ${short}"
 
       - name: Compute image tags
         id: tags
@@ -122,7 +121,7 @@ jobs:
           esac
           {
             echo "push=$push"
-            for t in "${out[@]}"; do echo "tags=${{ env.IMAGE }}:${t}"; done
+            for t in "${out[@]}"; do echo "tags=${{ needs.resolve.outputs.image }}:${t}"; done
           } >> "$GITHUB_OUTPUT"
 
   smoke:
