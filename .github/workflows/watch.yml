@@ -1,0 +1,140 @@
+name: watch
+
+# Watches both upstreams and keeps this repo's Dockerfile pins on the newest
+# release, then makes sure an image for that pairing actually exists on GHCR.
+#
+#   - @getpaseo/cli dist-tags.latest  -> ARG PASEO_VERSION
+#   - codercom/code-server:<tag> digest -> ARG CODE_SERVER_DIGEST
+#
+# A pairing is `paseo-<version>-cs-<digest12>`. Encoding the base digest in the
+# pairing is what makes a code-server-only bump rebuild something: if the tag
+# named only the Paseo version, a base refresh would look already-built and be
+# skipped forever.
+#
+# Three lessons carried over from pi-image and llama-swap-podman, both verified
+# against GitHub's own docs and those repos' run history:
+#
+#   1. A commit or tag pushed with GITHUB_TOKEN does NOT trigger workflows. The
+#      chore bump commit alone would silently build nothing, so this workflow
+#      always dispatches build-image.yml itself when the image is missing.
+#   2. workflow_dispatch needs `actions: write`. With only contents: write the
+#      POST answers 403 "Resource not accessible by integration", which is what
+#      made every run after pi 1.4.0 fail there: the commit pushed, the build
+#      never ran.
+#   3. A git pin is not proof of a build. Probe GHCR for the exact tag so a
+#      pairing whose build failed gets retried on the next tick instead of being
+#      skipped forever.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      paseo_version:
+        description: "Upstream Paseo version (blank = newest)"
+        required: false
+        default: ""
+      code_server_digest:
+        description: "code-server base digest (blank = current digest of the pinned tag)"
+        required: false
+        default: ""
+      force:
+        description: "Rebuild even if the pairing image already exists"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write # push the "chore: pin" bump commit
+  actions: write  # POST workflow_dispatch to build-image.yml (403 without it)
+
+jobs:
+  bump-and-build:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      INPUT_PASEO: ${{ inputs.paseo_version }}
+      INPUT_DIGEST: ${{ inputs.code_server_digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve upstream pins
+        id: up
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve_pins.sh
+          latest_paseo="$(scripts/resolve_pins.sh --paseo-version)"
+          latest_digest="$(scripts/resolve_pins.sh --cs-digest)"
+          echo "paseo=${INPUT_PASEO:-$latest_paseo}" >> "$GITHUB_OUTPUT"
+          echo "digest=${INPUT_DIGEST:-$latest_digest}" >> "$GITHUB_OUTPUT"
+          echo "newest upstream: paseo ${latest_paseo}, base ${latest_digest}"
+
+      - name: Sync Dockerfile pins
+        run: |
+          set -euo pipefail
+          sed -i -E "s|^(ARG PASEO_VERSION=).*|\1${{ steps.up.outputs.paseo }}|" Dockerfile
+          sed -i -E "s|^(ARG CODE_SERVER_DIGEST=).*|\1${{ steps.up.outputs.digest }}|" Dockerfile
+          if git diff --quiet; then
+            echo "Dockerfile already pinned to this pairing; nothing to sync"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore: pin paseo ${{ steps.up.outputs.paseo }} on base ${{ steps.up.outputs.digest }}"
+            git push origin "HEAD:${{ github.ref_name }}"
+            echo "Pins bumped. This push alone builds nothing; see the dispatch step."
+          fi
+
+      - name: Check image state on GHCR
+        id: state
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          short="$(echo "${{ steps.up.outputs.digest }}" | sed -E 's/^sha256://; s/^(.{12}).*/\1/')"
+          TAG="paseo-${{ steps.up.outputs.paseo }}-cs-${short}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if [ "${FORCE:-false}" = "true" ]; then
+            echo "image_exists=no (forced)"
+            echo "image_exists=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          token="$(curl -sS --retry 3 --retry-all-errors \
+            "https://ghcr.io/token?scope=repository:${repo}:pull" |
+            python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')"
+          [ -n "$token" ] || { echo "::error::no anonymous GHCR pull token"; exit 1; }
+          code="$(curl -sS --retry 3 --retry-all-errors -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+            "https://ghcr.io/v2/${repo}/manifests/${TAG}")"
+          case "$code" in
+            200) exists=yes ;;
+            404) exists=no ;;
+            *) echo "::error::GHCR manifest probe returned HTTP ${code}; refusing to guess"; exit 1 ;;
+          esac
+          echo "image_exists=${exists}" >> "$GITHUB_OUTPUT"
+          echo "${TAG}: ghcr image=${exists}"
+
+      - name: Trigger build-image.yml
+        if: steps.state.outputs.image_exists == 'no'
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          code="$(curl -sS --retry 3 --retry-all-errors -o "$body" -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/build-image.yml/dispatches" \
+            -d "{\"ref\":\"${{ github.ref }}\",\"inputs\":{\"paseo_version\":\"${{ steps.up.outputs.paseo }}\",\"code_server_digest\":\"${{ steps.up.outputs.digest }}\"}}")"
+          if [ "$code" != "204" ]; then
+            echo "::error::workflow_dispatch returned HTTP ${code}"
+            head -c 800 "$body" || true
+            exit 1
+          fi
+          echo "dispatched build-image.yml for ${{ steps.state.outputs.tag }}"
+
+      - name: Nothing to do
+        if: steps.state.outputs.image_exists == 'yes'
+        run: echo "${{ steps.state.outputs.tag }} is already built; nothing to do"

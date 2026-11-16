@@ -1,0 +1,16 @@
+#!/bin/sh
+# Paseo daemon health probe.
+#
+# Reads the port off PASEO_LISTEN so moving the port does not turn a healthy
+# daemon into a failing container, and exits non-zero when the daemon is not
+# answering — a probe that always returns 0 is worse than no probe.
+set -eu
+
+listen="${PASEO_LISTEN:-127.0.0.1:6767}"
+host="${listen%%:*}"
+port="${listen##*:}"
+[ "${host}" = "${listen}" ] && host="127.0.0.1"
+[ "${host}" = "0.0.0.0" ] && host="127.0.0.1"
+
+url="${HEALTHCHECK_URL:-http://${host}:${port}/api/health}"
+exec curl -fsS --max-time 5 -o /dev/null "${url}"

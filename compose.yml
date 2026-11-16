@@ -1,0 +1,50 @@
+# Example deployment. Copy this into your own compose setup and adjust the
+# bind mounts to your host.
+#
+#   docker compose up -d
+#   code-server  -> http://localhost:10101
+#   Paseo        -> http://localhost:10102
+#
+# The one gotcha that bites: PASEO_LISTEN defaults to 127.0.0.1:6767 inside the
+# container (right for a Coder coder_app, wrong for a published port). A
+# published port needs 0.0.0.0, and then PASEO_PASSWORD is mandatory — the
+# daemon accepts unauthenticated control connections from anything that can
+# reach it.
+
+name: code-server-paseo
+
+services:
+  workspace:
+    image: ghcr.io/syakyr/code-server-paseo:latest
+    build: .
+    container_name: code-server-paseo
+    restart: always
+    ports:
+      - "10101:8080"
+      - "10102:6767"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Required because 6767 is published above. Drop both lines if Paseo is
+      # only reached from inside the container.
+      PASEO_LISTEN: "0.0.0.0:6767"
+      PASEO_PASSWORD: "change-me"
+      # DNS names used to reach the daemon; IPs and localhost are allowed.
+      # PASEO_HOSTNAMES: "workspace.lan"
+    volumes:
+      # One home for both code-server and Paseo: ~/.pi, ~/.claude, ~/.codex,
+      # ~/.paseo all live here and are shared by definition.
+      - "./coder:/home/coder"
+      # Agent CLIs (pi, claude, ...) from a persistent Linuxbrew tree.
+      - "./homebrew:/home/linuxbrew/.linuxbrew"
+      # The code Paseo and its agents operate on.
+      - "${HOME:?set HOME}/Codebase:/home/coder/Codebase"
+    user: "1000:1000"
+    hostname: code-server
+    networks:
+      - main
+
+networks:
+  main:
+    # Change to `external: true` to join an existing network.
+    driver: bridge

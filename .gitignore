@@ -1,0 +1,8 @@
+# local state, never source
+scratch/
+*.log
+__pycache__/
+
+# compose bind-mount targets used for local testing
+coder/
+homebrew/

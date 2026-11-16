@@ -1,0 +1,30 @@
+code-server-paseo
+Copyright (c) 2026 Syakyr Surani
+
+This repository and its own code (Dockerfile, entrypoint hook, health probe,
+scripts, workflows, documentation) are licensed under the MIT License — see
+LICENSE.
+
+This image installs and redistributes unmodified upstream software. Their
+licenses are listed below; the texts are copied at build time from the trees
+actually present in the image and ship at
+/usr/share/licenses/code-server-paseo/.
+
+--------------------------------------------------------------------------------
+Third-party components shipped in the image
+--------------------------------------------------------------------------------
+
+code-server
+  License   MIT
+  Upstream  https://github.com/coder/code-server
+  In image  /usr/lib/code-server (base image, unmodified)
+  Text      licenses/code-server-LICENSE
+
+Paseo (@getpaseo/cli, @getpaseo/server and their workspace dependencies)
+  License   Apache-2.0
+  Upstream  https://github.com/getpaseo/paseo
+  In image  $(npm root -g)/@getpaseo/* (unmodified npm releases)
+  Text      licenses/paseo-LICENSE
+
+Every npm dependency pulled in by @getpaseo/cli keeps its own license and ships
+unmodified inside its package directory.

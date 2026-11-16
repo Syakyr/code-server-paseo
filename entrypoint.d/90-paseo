@@ -1,0 +1,30 @@
+#!/bin/sh
+# Start the Paseo daemon alongside code-server.
+#
+# The base image entrypoint runs every executable in $ENTRYPOINTD (default
+# /entrypoint.d) before it execs dumb-init + code-server, so this runs as the
+# workspace user, before the IDE is up.
+#
+# Two rules this obeys:
+#
+#   1. Never block. code-server starts only after every hook returns, so
+#      `paseo daemon start` (which backgrounds the daemon) runs under a timeout.
+#   2. Never fail the container. The base entrypoint runs these under `set -eu`,
+#      so a non-zero hook aborts the container before code-server starts.
+#      Losing Paseo must not lose the IDE: every problem is a warning and exit 0.
+set -eu
+
+export PASEO_LISTEN="${PASEO_LISTEN:-127.0.0.1:6767}"
+export PASEO_WEB_UI_ENABLED="${PASEO_WEB_UI_ENABLED:-true}"
+
+if ! command -v paseo >/dev/null 2>&1; then
+    echo "[90-paseo] paseo is not on PATH, skipping" >&2
+    exit 0
+fi
+
+if ! timeout "${PASEO_START_TIMEOUT:-90}" paseo daemon start; then
+    echo "[90-paseo] WARNING: paseo daemon did not start; code-server continues without it" >&2
+    exit 0
+fi
+
+echo "[90-paseo] paseo daemon listening on ${PASEO_LISTEN}"

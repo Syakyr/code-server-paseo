@@ -1,0 +1,12 @@
+# Everything is COPYed by name (NOTICE, entrypoint.d/, healthcheck); keep the
+# build context free of local state and scratch.
+.git
+.github
+.gitignore
+.dockerignore
+README.md
+compose.yml
+scripts/
+scratch/
+docs/
+*.log

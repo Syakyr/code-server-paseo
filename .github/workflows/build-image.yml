@@ -1,0 +1,190 @@
+name: build-image
+
+# Builds the code-server + Paseo workspace image and publishes it to GHCR.
+#
+# Modes, picked from the event:
+#
+#   pull_request   build + smoke test, push nothing
+#   push main      build + push :dev, :dev-<sha>, :paseo-<v>, :cs-<d12>,
+#                  :paseo-<v>-cs-<d12> and :latest
+#   push tag v*    same immutable tags as main, but NOT :latest (a rebuild of an
+#                  older pairing must not move :latest)
+#   dispatch       same as main, with pins overridden by the inputs
+#
+# :latest therefore always means "newest resolute code-server base + newest
+# Paseo", because watch.yml keeps the Dockerfile pins on main current and every
+# main build republishes :latest.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      paseo_version:
+        description: "@getpaseo/cli version to build (blank = Dockerfile PASEO_VERSION)"
+        required: false
+        default: ""
+      code_server_digest:
+        description: "code-server base digest (blank = Dockerfile CODE_SERVER_DIGEST)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      paseo_version: ${{ steps.pins.outputs.paseo_version }}
+      cs_digest: ${{ steps.pins.outputs.cs_digest }}
+      cs_short: ${{ steps.pins.outputs.cs_short }}
+      push: ${{ steps.tags.outputs.push }}
+      tags: ${{ steps.tags.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pins from the Dockerfile
+        id: pins
+        env:
+          INPUT_PASEO: ${{ inputs.paseo_version }}
+          INPUT_DIGEST: ${{ inputs.code_server_digest }}
+        run: |
+          set -euo pipefail
+          arg() { sed -n -E "s|^ARG $1=(.*)$|\1|p" Dockerfile | head -1; }
+          paseo="${INPUT_PASEO:-$(arg PASEO_VERSION)}"
+          digest="${INPUT_DIGEST:-$(arg CODE_SERVER_DIGEST)}"
+          image="$(arg CODE_SERVER_IMAGE)"
+          tag="$(arg CODE_SERVER_TAG)"
+          [ -n "$paseo" ]  || { echo "PASEO_VERSION missing from Dockerfile" >&2; exit 1; }
+          [ -n "$digest" ] || { echo "CODE_SERVER_DIGEST missing from Dockerfile" >&2; exit 1; }
+          case "$digest" in sha256:*) ;; *) echo "CODE_SERVER_DIGEST must be sha256:..." >&2; exit 1;; esac
+          short="${digest#sha256:}"; short="${short:0:12}"
+          {
+            echo "paseo_version=$paseo"
+            echo "cs_digest=$digest"
+            echo "cs_short=$short"
+            echo "cs_ref=${image}@${digest}"
+            echo "cs_tag=${tag}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building Paseo ${paseo} on ${image}:${tag} @ ${short}"
+
+      - name: Compute image tags
+        id: tags
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          SHORT_SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # workflow_dispatch events carry no repository.default_branch, and
+          # dispatching a pinned rebuild is exactly what watch.yml does.
+          default_branch="${DEFAULT_BRANCH:-${REF#refs/heads/}}"
+          short="${SHORT_SHA:0:7}"
+          paseo="paseo-${{ steps.pins.outputs.paseo_version }}"
+          csbase="cs-${{ steps.pins.outputs.cs_short }}"
+          pairing="${paseo}-${csbase}"
+          out=()
+          push=no
+          case "$REF_TYPE" in
+            tag)
+              push=yes
+              out+=("$paseo" "$csbase" "$pairing")
+              ;;
+            branch)
+              if [ "$EVENT" = "pull_request" ]; then
+                out+=("dev" "dev-${short}")
+              else
+                push=yes
+                # :latest only from the default branch, so it always tracks the
+                # pins watch.yml is currently holding on main.
+                if [ "$REF" = "refs/heads/${default_branch}" ]; then
+                  out+=("latest")
+                fi
+                out+=("dev" "dev-${short}" "$paseo" "$csbase" "$pairing")
+              fi
+              ;;
+            *)
+              # workflow_dispatch and anything else: immutable pairing tags only.
+              push=yes
+              out+=("$paseo" "$csbase" "$pairing")
+              ;;
+          esac
+          {
+            echo "push=$push"
+            for t in "${out[@]}"; do echo "tags=${{ env.IMAGE }}:${t}"; done
+          } >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build for the runner arch
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: csp-smoke:local
+          load: true
+          build-args: |
+            CODE_SERVER_REF=codercom/code-server@${{ needs.resolve.outputs.cs_digest }}
+            PASEO_VERSION=${{ needs.resolve.outputs.paseo_version }}
+          cache-from: type=gha,scope=smoke
+          cache-to: type=gha,scope=smoke,mode=max
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          chmod +x scripts/smoke_test.sh
+          scripts/smoke_test.sh csp-smoke:local "${{ needs.resolve.outputs.paseo_version }}"
+
+  build:
+    needs: [resolve, smoke]
+    if: needs.resolve.outputs.push == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: OCI labels
+        id: labels
+        run: |
+          {
+            echo "labels<<EOF"
+            echo "org.opencontainers.image.title=code-server-paseo"
+            echo "org.opencontainers.image.description=code-server and the Paseo daemon in one workspace image"
+            echo "org.opencontainers.image.version=paseo-${{ needs.resolve.outputs.paseo_version }}"
+            echo "io.github.syakyr.code-server-paseo.paseo-version=${{ needs.resolve.outputs.paseo_version }}"
+            echo "io.github.syakyr.code-server-paseo.code-server-digest=${{ needs.resolve.outputs.cs_digest }}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            CODE_SERVER_REF=codercom/code-server@${{ needs.resolve.outputs.cs_digest }}
+            PASEO_VERSION=${{ needs.resolve.outputs.paseo_version }}
+          tags: ${{ needs.resolve.outputs.tags }}
+          labels: ${{ steps.labels.outputs.labels }}
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,scope=release,mode=max
