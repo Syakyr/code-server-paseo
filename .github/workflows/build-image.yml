@@ -171,6 +171,10 @@ jobs:
     needs: [resolve, smoke]
     if: needs.resolve.outputs.push == 'yes'
     runs-on: ubuntu-latest
+    # Only this job creates the release; everything else stays read-only.
+    permissions:
+      contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
