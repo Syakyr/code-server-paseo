@@ -119,10 +119,15 @@ jobs:
               out+=("$paseo" "$csbase" "$pairing")
               ;;
           esac
+          # Repeated `key=` lines in $GITHUB_OUTPUT overwrite each other, so the
+          # list goes through as one heredoc-delimited value; otherwise only the
+          # last tag survives and every other tag silently disappears.
           {
             echo "push=$push"
+            echo "tags<<EOF"
             # Same job, so steps.pins — needs.resolve is empty inside its own job.
-            for t in "${out[@]}"; do echo "tags=${{ steps.pins.outputs.image }}:${t}"; done
+            for t in "${out[@]}"; do echo "${{ steps.pins.outputs.image }}:${t}"; done
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
   smoke:
