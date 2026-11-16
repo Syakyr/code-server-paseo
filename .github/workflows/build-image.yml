@@ -133,6 +133,8 @@ jobs:
   smoke:
     needs: resolve
     runs-on: ubuntu-latest
+    outputs:
+      code_server_version: ${{ steps.csver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -154,6 +156,16 @@ jobs:
           set -euo pipefail
           chmod +x scripts/smoke_test.sh
           scripts/smoke_test.sh csp-smoke:local "${{ needs.resolve.outputs.paseo_version }}"
+
+      # The release notes want the code-server version, not just the base
+      # digest, and the only honest source is the image itself.
+      - name: Report code-server version
+        id: csver
+        run: |
+          set -euo pipefail
+          v="$(docker run --rm --entrypoint code-server csp-smoke:local --version 2>&1 | sed -n -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -1)"
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+          echo "code-server ${v}"
 
   build:
     needs: [resolve, smoke]
@@ -184,6 +196,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: .
           push: true
@@ -195,3 +208,39 @@ jobs:
           labels: ${{ steps.labels.outputs.labels }}
           cache-from: type=gha,scope=release
           cache-to: type=gha,scope=release,mode=max
+
+      # One release per published pairing, the same ledger llama-swap-podman
+      # keeps: the tag names both upstreams, so the release list is the history
+      # of what moved.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: paseo-${{ needs.resolve.outputs.paseo_version }}-cs-${{ needs.resolve.outputs.cs_short }}
+          IMAGE: ${{ needs.resolve.outputs.image }}
+          PASEO: ${{ needs.resolve.outputs.paseo_version }}
+          CS_DIGEST: ${{ needs.resolve.outputs.cs_digest }}
+          CS_SHORT: ${{ needs.resolve.outputs.cs_short }}
+          CS_VERSION: ${{ needs.smoke.outputs.code_server_version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/make_release_notes.sh
+
+          # Idempotent and non-destructive: hand-written notes beat generated
+          # ones, so an existing release is left exactly as it is.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — leaving it alone"
+            exit 0
+          fi
+
+          PREV="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          scripts/make_release_notes.sh --tag "$TAG" --paseo "$PASEO" \
+            --cs-digest "$CS_DIGEST" --cs-short "$CS_SHORT" --cs-version "$CS_VERSION" \
+            --image "${IMAGE}:${TAG}" --digest "$DIGEST" --prev-tag "$PREV" \
+            --run-url "$RUN_URL" > "$RUNNER_TEMP/release-notes.md"
+
+          # No --verify-tag: the watcher dispatches builds without pushing a git
+          # tag, so gh must be free to create it at the commit CI built.
+          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          echo "published release $TAG" >> "$GITHUB_STEP_SUMMARY"

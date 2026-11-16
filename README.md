@@ -133,6 +133,12 @@ commits any pin bump, probes GHCR for the pairing tag, and dispatches a build wh
 image is missing. Pin bumps are therefore followed by a build automatically; the base
 digest is part of the pairing so a code-server-only refresh still rebuilds.
 
+Every published pairing also gets a [GitHub
+release](../../releases) named after it, with what moved since the previous one —
+whether that was Paseo, the code-server base, or neither. The release list is the
+version ledger; `scripts/make_release_notes.sh` renders it and skips a release that
+already exists rather than overwriting hand-written notes.
+
 Resolve the same facts locally:
 
 ```bash
