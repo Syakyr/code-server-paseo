@@ -71,8 +71,10 @@ else
     fi
 fi
 
+# The row carries its own leading newline so an absent size leaves no blank line
+# inside the table, which would split it in two.
 if [ -n "$SIZE" ] && [ "$SIZE" != "0" ]; then
-    size_row="| Size | $(awk -v b="$SIZE" 'BEGIN{printf "%.0f MB", b/1048576}') (compressed manifest sum) |"
+    size_row="$(printf '\n| Size | %s (compressed manifest sum) |' "$(awk -v b="$SIZE" 'BEGIN{printf "%.0f MB", b/1048576}')")"
 else
     size_row=""
 fi
@@ -98,8 +100,7 @@ ${IMAGE}
 
 | | |
 | --- | --- |
-| Digest | \`${DIGEST:-not captured}\` |
-${size_row}
+| Digest | \`${DIGEST:-not captured}\` |${size_row}
 | Platforms | \`linux/amd64\`, \`linux/arm64\` |
 | Also tagged | \`paseo-${PASEO}\`, \`cs-${CS_SHORT}\`, \`latest\`, \`dev\` |
 
