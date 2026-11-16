@@ -121,7 +121,8 @@ jobs:
           esac
           {
             echo "push=$push"
-            for t in "${out[@]}"; do echo "tags=${{ needs.resolve.outputs.image }}:${t}"; done
+            # Same job, so steps.pins — needs.resolve is empty inside its own job.
+            for t in "${out[@]}"; do echo "tags=${{ steps.pins.outputs.image }}:${t}"; done
           } >> "$GITHUB_OUTPUT"
 
   smoke:
