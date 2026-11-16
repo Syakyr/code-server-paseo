@@ -22,6 +22,16 @@
 # Global so both stages see one source of truth.
 ARG PASEO_VERSION=0.16.0
 
+ARG CODE_SERVER_IMAGE=codercom/code-server
+ARG CODE_SERVER_TAG=resolute
+# Digest of the multi-arch index that CODE_SERVER_TAG pointed at when this pin
+# was written. Bumped by .github/workflows/watch.yml; a published image tag
+# therefore always names one reproducible base.
+ARG CODE_SERVER_DIGEST=sha256:e63d49eee8a142443227642faeaf63b61ced12916a611695dbf7250d275afe62
+# Every ARG used in a FROM line must be declared before the first FROM: an ARG
+# declared after one is stage-scoped, and a blank base name is the failure.
+ARG CODE_SERVER_REF=${CODE_SERVER_IMAGE}@${CODE_SERVER_DIGEST}
+
 # Paseo is a Node CLI and the code-server image deliberately has no node or npm
 # on PATH (it keeps its own at /usr/lib/code-server/lib/node). Install in a
 # throwaway node stage, then copy the tree across and point a `node` symlink at
@@ -41,13 +51,6 @@ RUN set -eux; \
     test "${installed}" = "${PASEO_VERSION}"; \
     npm cache clean --force
 
-ARG CODE_SERVER_IMAGE=codercom/code-server
-ARG CODE_SERVER_TAG=resolute
-# Digest of the multi-arch index that CODE_SERVER_TAG pointed at when this pin
-# was written. Bumped by .github/workflows/watch.yml; a published image tag
-# therefore always names one reproducible base.
-ARG CODE_SERVER_DIGEST=sha256:e63d49eee8a142443227642faeaf63b61ced12916a611695dbf7250d275afe62
-ARG CODE_SERVER_REF=${CODE_SERVER_IMAGE}@${CODE_SERVER_DIGEST}
 FROM ${CODE_SERVER_REF}
 
 ARG PASEO_VERSION
