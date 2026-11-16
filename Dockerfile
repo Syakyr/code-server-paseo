@@ -45,6 +45,7 @@ ARG NODE_IMAGE=node:24-bookworm-slim
 FROM ${NODE_IMAGE} AS pack
 
 ARG PASEO_VERSION
+ARG PI_VERSION
 # The Paseo server tree pulls an optional onnxruntime native dep that downloads
 # at install time. The official Paseo image skips it the same way.
 ENV ONNXRUNTIME_NODE_INSTALL=skip
