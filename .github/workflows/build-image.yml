@@ -239,10 +239,13 @@ jobs:
           fi
 
           PREV="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          # gh prints the error body on stdout when there is no release yet, so
+          # only a tag that actually looks like a pairing counts.
+          case "$PREV" in paseo-*-cs-*) : ;; *) PREV="" ;; esac
           scripts/make_release_notes.sh --tag "$TAG" --paseo "$PASEO" \
             --cs-digest "$CS_DIGEST" --cs-short "$CS_SHORT" --cs-version "$CS_VERSION" \
             --image "${IMAGE}:${TAG}" --digest "$DIGEST" --prev-tag "$PREV" \
-            --run-url "$RUN_URL" > "$RUNNER_TEMP/release-notes.md"
+            --repo "${{ github.repository }}" --run-url "$RUN_URL" > "$RUNNER_TEMP/release-notes.md"
 
           # No --verify-tag: the watcher dispatches builds without pushing a git
           # tag, so gh must be free to create it at the commit CI built.

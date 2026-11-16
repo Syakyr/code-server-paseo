@@ -12,7 +12,7 @@
 set -euo pipefail
 
 TAG="" PASEO="" CS_DIGEST="" CS_SHORT="" CS_VERSION="" IMAGE="" DIGEST=""
-SIZE="" PREV="" RUN=""
+SIZE="" PREV="" RUN="" REPO=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -26,6 +26,7 @@ while [ $# -gt 0 ]; do
         --size-bytes) SIZE="$2" ;;
         --prev-tag) PREV="$2" ;;
         --run-url) RUN="$2" ;;
+        --repo) REPO="$2" ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
     shift 2
@@ -37,12 +38,22 @@ done
 }
 
 # A pairing tag is paseo-<version>-cs-<digest12>; pull both halves back out of
-# the previous one so the diff is against what was actually published.
+# the previous one so the diff is against what was actually published. Anything
+# that does not parse — including an API error body leaking through — is treated
+# as "no previous release" rather than printed verbatim.
 prev_paseo="" prev_short=""
-if [ -n "$PREV" ]; then
-    prev_paseo="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-(.+)-cs-[0-9a-f]+$|\1|p')"
-    prev_short="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-.+-cs-([0-9a-f]+)$|\1|p')"
-fi
+case "$PREV" in
+    paseo-*-cs-*)
+        prev_paseo="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-(.+)-cs-[0-9a-f]+$|\1|p')"
+        prev_short="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-.+-cs-([0-9a-f]+)$|\1|p')"
+        ;;
+esac
+if [ -z "$prev_paseo" ]; then PREV=""; fi
+
+# Release pages live at /owner/repo/releases/tag/..., so a relative link there
+# resolves against /releases and 404s. Absolute URLs only.
+REPO="${REPO#https://github.com/}"; REPO="${REPO#/}"
+REPO_URL="https://github.com/${REPO:-syakyr/code-server-paseo}"
 
 moved=""
 if [ -z "$PREV" ]; then
@@ -56,11 +67,7 @@ else
         moved="${moved}code-server base ${prev_short} → ${CS_SHORT}"
     fi
     if [ -z "$moved" ]; then
-        if [ -z "$prev_paseo" ]; then
-            moved="previous release ${PREV} does not match the pairing tag format"
-        else
-            moved="nothing upstream — this is a rebuild of ${PREV}"
-        fi
+        moved="nothing upstream — this is a rebuild of ${PREV}"
     fi
 fi
 
@@ -71,7 +78,7 @@ else
 fi
 
 cat <<EOF
-code-server and the [Paseo](https://github.com/getpaseo/paseo) daemon in one workspace image: one \`$HOME\`, one glibc, Paseo started by the image's own \`/entrypoint.d\` hook.
+code-server and the [Paseo](https://github.com/getpaseo/paseo) daemon in one workspace image: one home directory, one glibc, Paseo started by the image's own \`/entrypoint.d\` hook.
 
 **What moved since ${PREV:-nothing}:** ${moved}
 
@@ -98,7 +105,7 @@ ${IMAGE}
 
 ## Provenance
 
-Built by [this Actions run](${RUN:-.}) from the pins in [\`Dockerfile\`](blob/master/Dockerfile): \`ARG PASEO_VERSION=${PASEO}\`, \`ARG CODE_SERVER_DIGEST=${CS_DIGEST:-sha256:${CS_SHORT}...}\`. The smoke test asserts both servers answer over HTTP, that the health probe fails against a dead endpoint, and that a failing Paseo hook does not take code-server down.
+Built by [this Actions run](${RUN:-.}) from the pins in [\`Dockerfile\`](${REPO_URL}/blob/HEAD/Dockerfile): \`ARG PASEO_VERSION=${PASEO}\`, \`ARG CODE_SERVER_DIGEST=${CS_DIGEST:-sha256:${CS_SHORT}...}\`. The smoke test asserts both servers answer over HTTP, that the health probe fails against a dead endpoint, and that a failing Paseo hook does not take code-server down.
 
-See the [README](blob/master/README.md) for the two gotchas that bite on first run: \`PASEO_LISTEN\` must be \`0.0.0.0:6767\` for a published port, and Paseo's agent CLIs are not in the image.
+See the [README](${REPO_URL}/blob/HEAD/README.md) for the two gotchas that bite on first run: \`PASEO_LISTEN\` must be \`0.0.0.0:6767\` for a published port, and Paseo's agent CLIs are not in the image.
 EOF
