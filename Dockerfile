@@ -22,6 +22,11 @@
 # Global so both stages see one source of truth.
 ARG PASEO_VERSION=0.16.0
 
+# pi is baked in so a fresh device gets a working agent without a Linuxbrew
+# tree, and so the version is pinned and watched rather than whatever brew
+# happens to have. Same package pi-image installs.
+ARG PI_VERSION=1.5.2
+
 ARG CODE_SERVER_IMAGE=codercom/code-server
 ARG CODE_SERVER_TAG=resolute
 # Digest of the multi-arch index that CODE_SERVER_TAG pointed at when this pin
@@ -51,9 +56,20 @@ RUN set -eux; \
     test "${installed}" = "${PASEO_VERSION}"; \
     npm cache clean --force
 
+# --ignore-scripts: pi needs no install scripts, and refusing them keeps the
+# build reproducible. pi needs node >= 22.19; code-server's bundled node is 24.
+RUN set -eux; \
+    test -n "${PI_VERSION}" || { echo "PI_VERSION build-arg is required"; exit 1; }; \
+    npm install -g --prefix /opt/pi --ignore-scripts --no-fund --no-audit \
+      "@earendil-works/pi-coding-agent@${PI_VERSION}"; \
+    installed="$(node -p "require('/opt/pi/lib/node_modules/@earendil-works/pi-coding-agent/package.json').version")"; \
+    test "${installed}" = "${PI_VERSION}"; \
+    npm cache clean --force
+
 FROM ${CODE_SERVER_REF}
 
 ARG PASEO_VERSION
+ARG PI_VERSION
 USER root
 
 # /opt/paseo is self-contained (npm's bin symlinks are relative), so it lives
@@ -61,12 +77,15 @@ USER root
 # (`/usr/bin/env -S node --disable-warning=DEP0040`) resolves, and code-server's
 # bundled node is the runtime the image already ships and runs on.
 COPY --from=pack /opt/paseo /opt/paseo
+COPY --from=pack /opt/pi /opt/pi
 RUN set -eux; \
     test -x /usr/lib/code-server/lib/node; \
     ln -sf /usr/lib/code-server/lib/node /usr/local/bin/node; \
     ln -sf /opt/paseo/bin/paseo /usr/local/bin/paseo; \
+    ln -sf /opt/pi/bin/pi /usr/local/bin/pi; \
     node --version; \
-    paseo --version | grep -q "${PASEO_VERSION}"
+    paseo --version | grep -q "${PASEO_VERSION}"; \
+    pi --version | grep -q "${PI_VERSION}"
 
 # License texts come from the trees already in the image rather than vendored
 # copies, so they cannot drift from what is actually shipped.
@@ -81,6 +100,10 @@ RUN set -eux; \
     cp /opt/paseo/lib/node_modules/@getpaseo/cli/LICENSE "$dest/licenses/paseo-LICENSE"; \
     test -s /usr/lib/code-server/LICENSE; \
     cp /usr/lib/code-server/LICENSE "$dest/licenses/code-server-LICENSE"; \
+    # The pi npm tarball declares MIT in package.json but ships no license file,
+    # so record the declaration rather than inventing a text.
+    grep -q '"license": *"MIT"' \
+      /opt/pi/lib/node_modules/@earendil-works/pi-coding-agent/package.json; \
     chmod 0755 /entrypoint.d/90-paseo /usr/local/bin/paseo-healthcheck; \
     ls -l /entrypoint.d/
 

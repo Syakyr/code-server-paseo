@@ -26,6 +26,10 @@ on:
         description: "@getpaseo/cli version to build (blank = Dockerfile PASEO_VERSION)"
         required: false
         default: ""
+      pi_version:
+        description: "@earendil-works/pi-coding-agent version (blank = Dockerfile PI_VERSION)"
+        required: false
+        default: ""
       code_server_digest:
         description: "code-server base digest (blank = Dockerfile CODE_SERVER_DIGEST)"
         required: false
@@ -41,6 +45,7 @@ jobs:
     outputs:
       image: ${{ steps.pins.outputs.image }}
       paseo_version: ${{ steps.pins.outputs.paseo_version }}
+      pi_version: ${{ steps.pins.outputs.pi_version }}
       cs_digest: ${{ steps.pins.outputs.cs_digest }}
       cs_short: ${{ steps.pins.outputs.cs_short }}
       push: ${{ steps.tags.outputs.push }}
@@ -52,20 +57,24 @@ jobs:
         id: pins
         env:
           INPUT_PASEO: ${{ inputs.paseo_version }}
+          INPUT_PI: ${{ inputs.pi_version }}
           INPUT_DIGEST: ${{ inputs.code_server_digest }}
         run: |
           set -euo pipefail
           arg() { sed -n -E "s|^ARG $1=(.*)$|\1|p" Dockerfile | head -1; }
           paseo="${INPUT_PASEO:-$(arg PASEO_VERSION)}"
+          pi="${INPUT_PI:-$(arg PI_VERSION)}"
           digest="${INPUT_DIGEST:-$(arg CODE_SERVER_DIGEST)}"
           image_used="$(arg CODE_SERVER_IMAGE)"
           tag="$(arg CODE_SERVER_TAG)"
           [ -n "$paseo" ]  || { echo "PASEO_VERSION missing from Dockerfile" >&2; exit 1; }
+          [ -n "$pi" ]     || { echo "PI_VERSION missing from Dockerfile" >&2; exit 1; }
           [ -n "$digest" ] || { echo "CODE_SERVER_DIGEST missing from Dockerfile" >&2; exit 1; }
           case "$digest" in sha256:*) ;; *) echo "CODE_SERVER_DIGEST must be sha256:..." >&2; exit 1;; esac
           short="${digest#sha256:}"; short="${short:0:12}"
           {
             echo "paseo_version=$paseo"
+            echo "pi_version=$pi"
             echo "cs_digest=$digest"
             echo "cs_short=$short"
             echo "cs_ref=${image_used}@${digest}"
@@ -74,7 +83,7 @@ jobs:
             # must be lowercase and GitHub expressions have no toLower().
             echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
           } >> "$GITHUB_OUTPUT"
-          echo "Building Paseo ${paseo} on ${image_used}:${tag} @ ${short}"
+          echo "Building Paseo ${paseo} + pi ${pi} on ${image_used}:${tag} @ ${short}"
 
       - name: Compute image tags
         id: tags
@@ -91,8 +100,9 @@ jobs:
           default_branch="${DEFAULT_BRANCH:-${REF#refs/heads/}}"
           short="${SHORT_SHA:0:7}"
           paseo="paseo-${{ steps.pins.outputs.paseo_version }}"
+          pi="pi-${{ steps.pins.outputs.pi_version }}"
           csbase="cs-${{ steps.pins.outputs.cs_short }}"
-          pairing="${paseo}-${csbase}"
+          pairing="${paseo}-${pi}-${csbase}"
           out=()
           push=no
           case "$REF_TYPE" in
@@ -110,7 +120,7 @@ jobs:
                 if [ "$REF" = "refs/heads/${default_branch}" ]; then
                   out+=("latest")
                 fi
-                out+=("dev" "dev-${short}" "$paseo" "$csbase" "$pairing")
+                out+=("dev" "dev-${short}" "$paseo" "$pi" "$csbase" "$pairing")
               fi
               ;;
             *)
@@ -148,6 +158,7 @@ jobs:
           build-args: |
             CODE_SERVER_REF=codercom/code-server@${{ needs.resolve.outputs.cs_digest }}
             PASEO_VERSION=${{ needs.resolve.outputs.paseo_version }}
+            PI_VERSION=${{ needs.resolve.outputs.pi_version }}
           cache-from: type=gha,scope=smoke
           cache-to: type=gha,scope=smoke,mode=max
 
@@ -155,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x scripts/smoke_test.sh
-          scripts/smoke_test.sh csp-smoke:local "${{ needs.resolve.outputs.paseo_version }}"
+          scripts/smoke_test.sh csp-smoke:local "${{ needs.resolve.outputs.paseo_version }}" "${{ needs.resolve.outputs.pi_version }}"
 
       # The release notes want the code-server version, not just the base
       # digest, and the only honest source is the image itself.
@@ -195,6 +206,7 @@ jobs:
             echo "org.opencontainers.image.description=code-server and the Paseo daemon in one workspace image"
             echo "org.opencontainers.image.version=paseo-${{ needs.resolve.outputs.paseo_version }}"
             echo "io.github.syakyr.code-server-paseo.paseo-version=${{ needs.resolve.outputs.paseo_version }}"
+            echo "io.github.syakyr.code-server-paseo.pi-version=${{ needs.resolve.outputs.pi_version }}"
             echo "io.github.syakyr.code-server-paseo.code-server-digest=${{ needs.resolve.outputs.cs_digest }}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -208,6 +220,7 @@ jobs:
           build-args: |
             CODE_SERVER_REF=codercom/code-server@${{ needs.resolve.outputs.cs_digest }}
             PASEO_VERSION=${{ needs.resolve.outputs.paseo_version }}
+            PI_VERSION=${{ needs.resolve.outputs.pi_version }}
           tags: ${{ needs.resolve.outputs.tags }}
           labels: ${{ steps.labels.outputs.labels }}
           cache-from: type=gha,scope=release
@@ -219,9 +232,10 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: paseo-${{ needs.resolve.outputs.paseo_version }}-cs-${{ needs.resolve.outputs.cs_short }}
+          TAG: paseo-${{ needs.resolve.outputs.paseo_version }}-pi${{ needs.resolve.outputs.pi_version }}-cs-${{ needs.resolve.outputs.cs_short }}
           IMAGE: ${{ needs.resolve.outputs.image }}
           PASEO: ${{ needs.resolve.outputs.paseo_version }}
+          PI: ${{ needs.resolve.outputs.pi_version }}
           CS_DIGEST: ${{ needs.resolve.outputs.cs_digest }}
           CS_SHORT: ${{ needs.resolve.outputs.cs_short }}
           CS_VERSION: ${{ needs.smoke.outputs.code_server_version }}
@@ -241,8 +255,8 @@ jobs:
           PREV="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
           # gh prints the error body on stdout when there is no release yet, so
           # only a tag that actually looks like a pairing counts.
-          case "$PREV" in paseo-*-cs-*) : ;; *) PREV="" ;; esac
-          scripts/make_release_notes.sh --tag "$TAG" --paseo "$PASEO" \
+          case "$PREV" in paseo-*-pi*-cs-*) : ;; *) PREV="" ;; esac
+          scripts/make_release_notes.sh --tag "$TAG" --paseo "$PASEO" --pi "$PI" \
             --cs-digest "$CS_DIGEST" --cs-short "$CS_SHORT" --cs-version "$CS_VERSION" \
             --image "${IMAGE}:${TAG}" --digest "$DIGEST" --prev-tag "$PREV" \
             --repo "${{ github.repository }}" --run-url "$RUN_URL" > "$RUNNER_TEMP/release-notes.md"

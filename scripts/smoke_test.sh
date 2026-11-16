@@ -17,8 +17,9 @@
 #   9. a Paseo failure does not take code-server down with it
 set -euo pipefail
 
-IMAGE="${1:?usage: smoke_test.sh <image> [paseo_version]}"
+IMAGE="${1:?usage: smoke_test.sh <image> [paseo_version] [pi_version]}"
 PASEO_VERSION="${2:-}"
+PI_VERSION="${3:-}"
 DOCKER="${DOCKER:-docker}"
 
 CID=""
@@ -51,6 +52,14 @@ if [ -n "$PASEO_VERSION" ]; then
         fail "expected paseo ${PASEO_VERSION}, got ${installed}"
 fi
 pass "paseo CLI runs and reports the expected version"
+
+# 1b. pi baked in ------------------------------------------------------------
+piout="$("$DOCKER" run --rm --entrypoint pi "$IMAGE" --version 2>&1 | tail -1)"
+echo "  pi --version: $piout"
+if [ -n "$PI_VERSION" ]; then
+    [ "${piout#v}" = "${PI_VERSION}" ] || fail "expected pi ${PI_VERSION}, got ${piout}"
+fi
+pass "pi CLI runs and reports the expected version"
 
 # 2. code-server still there -------------------------------------------------
 # No `| head -1` here: this script runs with pipefail, and code-server prints

@@ -1,8 +1,9 @@
 # code-server + Paseo in one image
 
 [`code-server`](https://github.com/coder/code-server) (VS Code in the browser) with the
-[`Paseo`](https://github.com/getpaseo/paseo) daemon installed on top, started by the
-image's own startup hook. One container, one `$HOME`, one glibc.
+[`Paseo`](https://github.com/getpaseo/paseo) daemon and the [`pi`](https://github.com/earendil-works/pi)
+coding agent installed on top, Paseo started by the image's own startup hook. One
+container, one `$HOME`, one glibc.
 
 ```
 ghcr.io/syakyr/code-server-paseo:latest
@@ -61,19 +62,26 @@ binary, so `paseo` resolves its shebang without the image carrying a second runt
 If you want npm for your own work, install it the way you already do (Linuxbrew, or
 `nvm`) — it will land ahead of `/usr/local/bin` on `PATH` and shadow nothing.
 
-**Paseo's agent CLIs are not in this image.** `pi`, `claude`, `codex` and friends come
-from whatever you mount or install. The intended pattern is a persistent Linuxbrew
-tree at `/home/linuxbrew/.linuxbrew` (see [compose.yml](compose.yml)), which also
-lands them on `PATH` for both code-server and Paseo.
+**pi is baked in; the other agent CLIs are not.** `pi` comes from the image, pinned
+and watched, so a fresh device needs no Linuxbrew tree to run agents. `claude`,
+`codex` and friends come from whatever you mount or install — the intended pattern is
+a persistent Linuxbrew tree at `/home/linuxbrew/.linuxbrew` (see
+[compose.yml](compose.yml)).
+
+If your mounted brew tree also has pi, **it shadows the image one in login shells**:
+brew's `shellenv` prepends itself to `PATH`, so `pi` resolves to the brew copy and
+you get silent version skew. Uninstall it there (`brew uninstall pi-coding-agent`) and
+let the image own it.
 
 ## Tags
 
 | Tag | Meaning |
 | --- | --- |
-| `latest` | newest build from `main`: newest `resolute` code-server base + newest Paseo |
+| `latest` | newest build from `main`: newest `resolute` code-server base + newest Paseo + newest pi |
 | `paseo-<x.y.z>` | newest build of that Paseo version |
+| `pi-<x.y.z>` | newest build of that pi version |
 | `cs-<digest12>` | newest build on that code-server base digest |
-| `paseo-<x.y.z>-cs-<digest12>` | the immutable pairing — pin this in production |
+| `paseo-<v>-pi<v>-cs-<digest12>` | the immutable triple — pin this in production |
 | `dev`, `dev-<sha>` | branch builds, never published from a PR |
 
 `latest` moves only on builds from the default branch, so rebuilding an older pairing
@@ -119,19 +127,20 @@ against a dead endpoint.
 
 ## Pinning and updates
 
-`Dockerfile` carries both pins as `ARG`s:
+`Dockerfile` carries all three pins as `ARG`s:
 
 ```dockerfile
 ARG CODE_SERVER_TAG=resolute
 ARG CODE_SERVER_DIGEST=sha256:e63d49...
 ARG PASEO_VERSION=0.16.0
+ARG PI_VERSION=1.5.2
 ```
 
 [watch.yml](.github/workflows/watch.yml) runs every 6 hours, resolves the newest
-`@getpaseo/cli` release and the current digest of `codercom/code-server:resolute`,
-commits any pin bump, probes GHCR for the pairing tag, and dispatches a build when the
-image is missing. Pin bumps are therefore followed by a build automatically; the base
-digest is part of the pairing so a code-server-only refresh still rebuilds.
+`@getpaseo/cli` and `@earendil-works/pi-coding-agent` releases and the current digest
+of `codercom/code-server:resolute`, commits any pin bump, probes GHCR for the pairing
+tag, and dispatches a build when the image is missing. Every upstream is part of the
+pairing tag, so a bump in any one of them rebuilds rather than looking already built.
 
 Every published pairing also gets a [GitHub
 release](../../releases) named after it, with what moved since the previous one —
@@ -149,7 +158,7 @@ scripts/resolve_pins.sh --all
 ## Development
 
 ```bash
-docker build -t csp:local --build-arg PASEO_VERSION=0.16.0 .
+docker build -t csp:local --build-arg PASEO_VERSION=0.16.0 --build-arg PI_VERSION=1.5.2 .
 scripts/smoke_test.sh csp:local 0.16.0
 ```
 

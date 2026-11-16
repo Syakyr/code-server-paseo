@@ -23,8 +23,16 @@ code-server
 Paseo (@getpaseo/cli, @getpaseo/server and their workspace dependencies)
   License   Apache-2.0
   Upstream  https://github.com/getpaseo/paseo
-  In image  $(npm root -g)/@getpaseo/* (unmodified npm releases)
+  In image  /opt/paseo (unmodified npm releases)
   Text      licenses/paseo-LICENSE
 
-Every npm dependency pulled in by @getpaseo/cli keeps its own license and ships
-unmodified inside its package directory.
+pi (@earendil-works/pi-coding-agent)
+  License   MIT, per the package.json license field
+  Upstream  https://github.com/earendil-works/pi
+  In image  /opt/pi (unmodified npm release)
+  Text      none shipped — the npm tarball carries no LICENSE file, so the
+            build asserts the package.json declaration instead of copying a
+            text it does not have
+
+Every npm dependency pulled in by @getpaseo/cli and @earendil-works/pi-coding-agent
+keeps its own license and ships unmodified inside its package directory.

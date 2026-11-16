@@ -11,13 +11,14 @@
 # because the question a reader has is "did Paseo move, or did the base?".
 set -euo pipefail
 
-TAG="" PASEO="" CS_DIGEST="" CS_SHORT="" CS_VERSION="" IMAGE="" DIGEST=""
+TAG="" PASEO="" PI="" CS_DIGEST="" CS_SHORT="" CS_VERSION="" IMAGE="" DIGEST=""
 SIZE="" PREV="" RUN="" REPO=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --tag) TAG="$2" ;;
         --paseo) PASEO="$2" ;;
+        --pi) PI="$2" ;;
         --cs-digest) CS_DIGEST="$2" ;;
         --cs-short) CS_SHORT="$2" ;;
         --cs-version) CS_VERSION="$2" ;;
@@ -41,10 +42,11 @@ done
 # the previous one so the diff is against what was actually published. Anything
 # that does not parse — including an API error body leaking through — is treated
 # as "no previous release" rather than printed verbatim.
-prev_paseo="" prev_short=""
+prev_paseo="" prev_short="" prev_pi=""
 case "$PREV" in
-    paseo-*-cs-*)
-        prev_paseo="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-(.+)-cs-[0-9a-f]+$|\1|p')"
+    paseo-*-pi*-cs-*)
+        prev_paseo="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-(.+)-pi([^-]+)-cs-([0-9a-f]+)$|\1|p')"
+        prev_pi="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-.+-pi([^-]+)-cs-([0-9a-f]+)$|\1|p')"
         prev_short="$(printf '%s\n' "$PREV" | sed -n -E 's|^paseo-.+-cs-([0-9a-f]+)$|\1|p')"
         ;;
 esac
@@ -61,6 +63,10 @@ if [ -z "$PREV" ]; then
 else
     if [ -n "$prev_paseo" ] && [ "$prev_paseo" != "$PASEO" ]; then
         moved="Paseo ${prev_paseo} → ${PASEO}"
+    fi
+    if [ -n "$prev_pi" ] && [ -n "$PI" ] && [ "$prev_pi" != "$PI" ]; then
+        if [ -n "$moved" ]; then moved="${moved}; "; fi
+        moved="${moved}pi ${prev_pi} → ${PI}"
     fi
     if [ -n "$prev_short" ] && [ "$prev_short" != "$CS_SHORT" ]; then
         if [ -n "$moved" ]; then moved="${moved}; "; fi
@@ -88,6 +94,10 @@ code-server and the [Paseo](https://github.com/getpaseo/paseo) daemon in one wor
   npm: https://www.npmjs.com/package/@getpaseo/cli/v/${PASEO}
   Upstream: https://github.com/getpaseo/paseo
 
+**pi** ${PI:-not baked in}
+  npm: https://www.npmjs.com/package/@earendil-works/pi-coding-agent/v/${PI:-latest}
+  Upstream: https://github.com/earendil-works/pi
+
 **code-server** ${CS_VERSION:-see \`code-server --version\` in the image}
   Upstream: https://github.com/coder/code-server
   Base: \`codercom/code-server@${CS_DIGEST:-sha256:${CS_SHORT}...}\`
@@ -102,7 +112,7 @@ ${IMAGE}
 | --- | --- |
 | Digest | \`${DIGEST:-not captured}\` |${size_row}
 | Platforms | \`linux/amd64\`, \`linux/arm64\` |
-| Also tagged | \`paseo-${PASEO}\`, \`cs-${CS_SHORT}\`, \`latest\`, \`dev\` |
+| Also tagged | \`paseo-${PASEO}\`, \`pi-${PI}\`, \`cs-${CS_SHORT}\`, \`latest\`, \`dev\` |
 
 ## Provenance
 

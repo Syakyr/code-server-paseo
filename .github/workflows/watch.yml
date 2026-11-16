@@ -4,12 +4,12 @@ name: watch
 # release, then makes sure an image for that pairing actually exists on GHCR.
 #
 #   - @getpaseo/cli dist-tags.latest  -> ARG PASEO_VERSION
+#   - @earendil-works/pi-coding-agent dist-tags.latest -> ARG PI_VERSION
 #   - codercom/code-server:<tag> digest -> ARG CODE_SERVER_DIGEST
 #
-# A pairing is `paseo-<version>-cs-<digest12>`. Encoding the base digest in the
-# pairing is what makes a code-server-only bump rebuild something: if the tag
-# named only the Paseo version, a base refresh would look already-built and be
-# skipped forever.
+# A pairing is `paseo-<version>-pi<version>-cs-<digest12>`. Encoding all three is
+# what makes a bump in any one of them rebuild something: if the tag named only
+# Paseo, a pi or base refresh would look already-built and be skipped forever.
 #
 # Three lessons carried over from pi-image and llama-swap-podman, both verified
 # against GitHub's own docs and those repos' run history:
@@ -34,6 +34,10 @@ on:
         description: "Upstream Paseo version (blank = newest)"
         required: false
         default: ""
+      pi_version:
+        description: "Upstream pi version (blank = newest)"
+        required: false
+        default: ""
       code_server_digest:
         description: "code-server base digest (blank = current digest of the pinned tag)"
         required: false
@@ -54,6 +58,7 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       INPUT_PASEO: ${{ inputs.paseo_version }}
+      INPUT_PI: ${{ inputs.pi_version }}
       INPUT_DIGEST: ${{ inputs.code_server_digest }}
     steps:
       - uses: actions/checkout@v4
@@ -66,22 +71,25 @@ jobs:
           set -euo pipefail
           chmod +x scripts/resolve_pins.sh
           latest_paseo="$(scripts/resolve_pins.sh --paseo-version)"
+          latest_pi="$(scripts/resolve_pins.sh --pi-version)"
           latest_digest="$(scripts/resolve_pins.sh --cs-digest)"
           echo "paseo=${INPUT_PASEO:-$latest_paseo}" >> "$GITHUB_OUTPUT"
+          echo "pi=${INPUT_PI:-$latest_pi}" >> "$GITHUB_OUTPUT"
           echo "digest=${INPUT_DIGEST:-$latest_digest}" >> "$GITHUB_OUTPUT"
-          echo "newest upstream: paseo ${latest_paseo}, base ${latest_digest}"
+          echo "newest upstream: paseo ${latest_paseo}, pi ${latest_pi}, base ${latest_digest}"
 
       - name: Sync Dockerfile pins
         run: |
           set -euo pipefail
           sed -i -E "s|^(ARG PASEO_VERSION=).*|\1${{ steps.up.outputs.paseo }}|" Dockerfile
+          sed -i -E "s|^(ARG PI_VERSION=).*|\1${{ steps.up.outputs.pi }}|" Dockerfile
           sed -i -E "s|^(ARG CODE_SERVER_DIGEST=).*|\1${{ steps.up.outputs.digest }}|" Dockerfile
           if git diff --quiet; then
             echo "Dockerfile already pinned to this pairing; nothing to sync"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "chore: pin paseo ${{ steps.up.outputs.paseo }} on base ${{ steps.up.outputs.digest }}"
+            git commit -am "chore: pin paseo ${{ steps.up.outputs.paseo }} + pi ${{ steps.up.outputs.pi }} on base ${{ steps.up.outputs.digest }}"
             git push origin "HEAD:${{ github.ref_name }}"
             echo "Pins bumped. This push alone builds nothing; see the dispatch step."
           fi
@@ -93,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           short="$(echo "${{ steps.up.outputs.digest }}" | sed -E 's/^sha256://; s/^(.{12}).*/\1/')"
-          TAG="paseo-${{ steps.up.outputs.paseo }}-cs-${short}"
+          TAG="paseo-${{ steps.up.outputs.paseo }}-pi${{ steps.up.outputs.pi }}-cs-${short}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           if [ "${FORCE:-false}" = "true" ]; then
             echo "image_exists=no (forced)"
@@ -127,7 +135,7 @@ jobs:
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/build-image.yml/dispatches" \
-            -d "{\"ref\":\"${{ github.ref }}\",\"inputs\":{\"paseo_version\":\"${{ steps.up.outputs.paseo }}\",\"code_server_digest\":\"${{ steps.up.outputs.digest }}\"}}")"
+            -d "{\"ref\":\"${{ github.ref }}\",\"inputs\":{\"paseo_version\":\"${{ steps.up.outputs.paseo }}\",\"pi_version\":\"${{ steps.up.outputs.pi }}\",\"code_server_digest\":\"${{ steps.up.outputs.digest }}\"}}")"
           if [ "$code" != "204" ]; then
             echo "::error::workflow_dispatch returned HTTP ${code}"
             head -c 800 "$body" || true

@@ -56,33 +56,45 @@ cs_digest() {
         python3 -c 'import json,sys; d=json.load(sys.stdin).get("digest",""); sys.exit("no digest in Docker Hub response") if not d else print(d)'
 }
 
+pi_version() {
+    # Same rule as paseo: dist-tags.latest is what a plain install resolves to.
+    http_get "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest" |
+        python3 -c 'import json,sys; v=json.load(sys.stdin).get("version",""); sys.exit("no version in npm response") if not v else print(v)'
+}
+
 case "${1:---all}" in
     --paseo-version) paseo_version ;;
+    --pi-version)    pi_version ;;
     --cs-digest)     cs_digest ;;
     --all)
         printf 'PASEO_VERSION=%s\n' "$(paseo_version)"
+        printf 'PI_VERSION=%s\n' "$(pi_version)"
         printf 'CODE_SERVER_DIGEST=%s\n' "$(cs_digest)"
         ;;
     --check)
         up_paseo="$(paseo_version)"
+        up_pi="$(pi_version)"
         up_digest="$(cs_digest)"
         changed=0
-        if [ "$up_paseo" = "$PASEO_PIN" ]; then
-            echo "paseo    ${PASEO_PIN} (upstream ${up_paseo}) unchanged"
-        else
-            echo "paseo    ${PASEO_PIN} -> ${up_paseo}"
-            changed=1
-        fi
-        if [ "$up_digest" = "$CS_DIGEST_PIN" ]; then
-            echo "base     ${CODE_SERVER_TAG} ${CS_DIGEST_PIN:0:19}... unchanged"
-        else
-            echo "base     ${CODE_SERVER_TAG} ${CS_DIGEST_PIN:0:19}... -> ${up_digest:0:19}..."
-            changed=1
-        fi
+        pin() { sed -n -E "s|^ARG $1=(.*)$|\1|p" "$DOCKERFILE" | head -1; }
+        report() { # name upstream pinned
+            if [ "$2" = "$3" ]; then
+                echo "$1       ${3} (upstream ${2}) unchanged"
+            else
+                echo "$1       ${3} -> ${2}"
+                printf 'yes' > "$TMPDIR_CHANGED"
+            fi
+        }
+        TMPDIR_CHANGED="$(mktemp)"
+        report paseo "$(paseo_version)" "$(pin PASEO_VERSION)"
+        report pi    "$(pi_version)"    "$(pin PI_VERSION)"
+        report base  "$(cs_digest)"     "$(pin CODE_SERVER_DIGEST)"
+        [ ! -s "$TMPDIR_CHANGED" ] || changed=1
+        rm -f "$TMPDIR_CHANGED"
         exit "$changed"
         ;;
     *)
-        echo "usage: $0 [--all|--paseo-version|--cs-digest|--check]" >&2
+        echo "usage: $0 [--all|--paseo-version|--pi-version|--cs-digest|--check]" >&2
         exit 2
         ;;
 esac
