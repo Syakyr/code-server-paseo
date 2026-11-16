@@ -26,7 +26,7 @@ cleanup() { [ -n "$CID" ] && "$DOCKER" rm -f "$CID" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 pass() { printf '  ok   %s\n' "$1"; }
-fail() { printf '  FAIL %s\n' "$1" >&2; exit 1; }
+fail() { printf '  FAIL %s\n' "$1" >&2; [ -z "$CID" ] || "$DOCKER" logs "$CID" 2>&1 | tail -40 >&2; exit 1; }
 
 wait_http() { # url attempts -> sets CODE
     local url="$1" attempts="${2:-40}" i
@@ -112,11 +112,11 @@ pass "healthcheck discovers a non-default PASEO_LISTEN port"
 # 9. a Paseo failure must not kill code-server -------------------------------
 # The base entrypoint runs hooks under `set -eu`, so a hook that exits non-zero
 # aborts the container before code-server starts. Our hook therefore always
-# exits 0. This drives it down that path with an unwritable PASEO_HOME: the
+# exits 0. This drives it down that path with an uncreatable PASEO_HOME: the
 # daemon cannot start, the IDE must still come up.
 "$DOCKER" rm -f "$CID" >/dev/null 2>&1 || true
 CID="$("$DOCKER" run -d --rm -e PASEO_LISTEN=0.0.0.0:6767 \
-    -e PASEO_START_TIMEOUT=20 -e PASEO_HOME=/proc/forbidden \
+    -e PASEO_HOME=/proc/forbidden \
     -p 127.0.0.1:18080:8080 "$IMAGE")"
 wait_http http://127.0.0.1:18080/ 90 ||
     fail "code-server did not start while the paseo hook was failing"

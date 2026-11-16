@@ -87,8 +87,11 @@ cannot drag it backwards.
 | `PASEO_PASSWORD` | unset | required for anything reachable off loopback |
 | `PASEO_WEB_UI_ENABLED` | `true` | the daemon serves the Paseo web UI itself |
 | `PASEO_HOSTNAMES` | unset | extra DNS names allowed in the `Host` header |
-| `PASEO_START_TIMEOUT` | `90` | seconds the startup hook gives `paseo daemon start` |
+| `PASEO_HOME` | `$HOME/.paseo` | daemon state; created by the hook if missing |
 | `HEALTHCHECK_URL` | derived | override for the health probe |
+
+Any `PASEO_*` daemon setting the official image honours works here too, for the same
+reason: the daemon is launched in deployment mode.
 
 ## How the daemon gets started
 
@@ -98,15 +101,20 @@ The base image entrypoint runs every executable in `$ENTRYPOINTD` (default
 image drops one script there, [entrypoint.d/90-paseo](entrypoint.d/90-paseo). No
 supervisor, no `s6`, code-server stays PID 1.
 
-That hook obeys two rules, and both are load-bearing:
+That hook obeys three rules, and all three are load-bearing:
 
-1. **Never block.** code-server starts only after every hook returns, so
-   `paseo daemon start` runs under `timeout`.
+1. **Never block.** code-server starts only after every hook returns, so the daemon
+   is backgrounded.
 2. **Never exit non-zero.** The base entrypoint runs hooks under `set -eu`, so a
    failing hook aborts the container before code-server starts. Losing Paseo must not
    lose the IDE, so every failure is a warning and `exit 0`.
+3. **Use `paseo daemon run`, not `paseo daemon start`.** `start` is a *managed*
+   launch and `daemonLaunchEnvironment()` deletes every `DAEMON_SETTING_ENV_KEYS`
+   entry from the child environment — `PASEO_LISTEN`, `PASEO_PASSWORD`,
+   `PASEO_WEB_UI_ENABLED` would all be ignored and the daemon would sit on its
+   default port. `run` is deployment mode and keeps the environment.
 
-`scripts/smoke_test.sh` asserts both, plus that the health probe actually fails
+`scripts/smoke_test.sh` asserts all three, plus that the health probe actually fails
 against a dead endpoint.
 
 ## Pinning and updates
