@@ -36,7 +36,9 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  # github.repository carries the owner's login casing ("Syakyr/..."), and
+  # registry repository names must be lowercase or buildx refuses the tag.
+  IMAGE: ghcr.io/${{ toLower(github.repository) }}
 
 jobs:
   resolve:
