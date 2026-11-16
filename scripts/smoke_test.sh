@@ -33,7 +33,9 @@ wait_http() { # url attempts -> sets CODE
     CODE="000"
     for i in $(seq 1 "$attempts"); do
         CODE="$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)"
-        case "$CODE" in 200 | 301 | 302) return 0 ;; esac
+        # code-server redirects to /login (302/307) when auth is on; Paseo
+        # answers 200 on /api/health.
+        case "$CODE" in 2?? | 301 | 302 | 307) return 0 ;; esac
         sleep 1
     done
     return 1
@@ -51,8 +53,10 @@ fi
 pass "paseo CLI runs and reports the expected version"
 
 # 2. code-server still there -------------------------------------------------
-out="$("$DOCKER" run --rm --entrypoint code-server "$IMAGE" --version 2>&1 | head -1)"
-echo "  code-server: $out"
+# No `| head -1` here: this script runs with pipefail, and code-server prints
+# several lines, so closing the pipe early fails the pipeline with SIGPIPE.
+out="$("$DOCKER" run --rm --entrypoint code-server "$IMAGE" --version 2>&1)"
+echo "  code-server: ${out%%$'\n'*}"
 [ -n "$out" ] || fail "code-server --version produced no output"
 pass "code-server runs"
 
@@ -116,7 +120,8 @@ CID="$("$DOCKER" run -d --rm -e PASEO_LISTEN=0.0.0.0:6767 \
     -p 127.0.0.1:18080:8080 "$IMAGE")"
 wait_http http://127.0.0.1:18080/ 90 ||
     fail "code-server did not start while the paseo hook was failing"
-"$DOCKER" logs "$CID" 2>&1 | grep -q "90-paseo" ||
+"$DOCKER" logs "$CID" >"${TMPDIR:-/tmp}/csp-smoke.log" 2>&1 || true
+grep -q "90-paseo" "${TMPDIR:-/tmp}/csp-smoke.log" ||
     fail "the paseo hook never ran"
 pass "code-server survives a paseo hook that cannot start the daemon"
 
