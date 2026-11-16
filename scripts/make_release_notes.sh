@@ -72,9 +72,9 @@ else
 fi
 
 if [ -n "$SIZE" ] && [ "$SIZE" != "0" ]; then
-    size_h="$(awk -v b="$SIZE" 'BEGIN{printf "%.0f MB", b/1048576}')"
+    size_row="| Size | $(awk -v b="$SIZE" 'BEGIN{printf "%.0f MB", b/1048576}') (compressed manifest sum) |"
 else
-    size_h="unknown"
+    size_row=""
 fi
 
 cat <<EOF
@@ -99,7 +99,7 @@ ${IMAGE}
 | | |
 | --- | --- |
 | Digest | \`${DIGEST:-not captured}\` |
-| Size | ${size_h} (compressed manifest sum) |
+${size_row}
 | Platforms | \`linux/amd64\`, \`linux/arm64\` |
 | Also tagged | \`paseo-${PASEO}\`, \`cs-${CS_SHORT}\`, \`latest\`, \`dev\` |
 
