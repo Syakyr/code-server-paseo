@@ -93,7 +93,7 @@ that true, and `scripts/smoke_test.sh` asserts each one:
 | The login shell of `coder` **and** `root` is `/usr/bin/fish` | `usermod` in the Dockerfile | code-server takes the default terminal from the login shell and lists profiles from `/etc/shells`; both live in the image, so a volume over `$HOME` cannot hide them. Both users because the runtime user is unsettled — see the gotcha below |
 | `ENV SHELL=/usr/bin/fish` | the Dockerfile | the base image sets no `SHELL` at all, so anything that resolves a shell from the environment falls back to bash |
 | `starship init fish \| source` | `/etc/fish/conf.d/starship.fish` | system-wide drop-in, read before `~/.config/fish/config.fish`, so your own config still gets the last word |
-| `terminal.integrated.defaultProfile.linux` | written at first boot by [entrypoint.d/91-fish-default](entrypoint.d/91-fish-default) | the IDE's own setting wins over everything above, so it is seeded **only when absent** — a default profile you chose yourself is never overwritten |
+| `terminal.integrated.defaultProfile.linux` | written at first boot by [entrypoint.d/91-fish-default](entrypoint.d/91-fish-default) | the IDE's own setting wins over everything above, so the hook adds it only when absent: a default profile you chose by hand stays in place |
 
 Two things this deliberately does not do:
 
