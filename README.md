@@ -76,9 +76,9 @@ let the image own it.
 
 **The image runs as root.** The base image ends at `USER 1000` (`coder`), but the
 install steps here need root and nothing resets it, so code-server and the Paseo
-daemon run as uid 0. That predates this repo's shell setup and is tracked
-separately: switching to `USER coder` is a visible change for anyone whose
-bind-mounted volumes are already root-owned. Both users' login shells are set to
+daemon run as uid 0. That predates this repo's shell setup and is tracked in
+[#1](https://github.com/Syakyr/code-server-paseo/issues/1): switching to `USER coder`
+is a visible change for anyone whose bind-mounted volumes are already root-owned. Both users' login shells are set to
 fish so the terminal is the same either way, and `DOCKER_USER` (which renames
 `coder`) keeps the shell it has.
 
@@ -119,11 +119,16 @@ your user settings; the boot hook will leave it alone from then on.
 | `paseo-<x.y.z>` | newest build of that Paseo version |
 | `pi-<x.y.z>` | newest build of that pi version |
 | `cs-<digest12>` | newest build on that code-server base digest |
-| `paseo-<v>-pi<v>-cs-<digest12>` | the immutable triple — pin this in production |
+| `paseo-<v>-pi<v>-cs-<digest12>` | the triple `watch.yml` probes for; current rather than immutable, see below |
 | `dev`, `dev-<sha>` | branch builds, never published from a PR |
 
 `latest` moves only on builds from the default branch, so rebuilding an older pairing
 cannot drag it backwards.
+
+The pairing tag names the three pins, not the image's contents. A Dockerfile change
+that moves no pin re-points it at new content, and the release for it keeps the notes
+it was cut with. Pin an exact digest rather than the tag when the bytes matter
+([#2](https://github.com/Syakyr/code-server-paseo/issues/2) tracks closing that gap).
 
 ## Environment
 
