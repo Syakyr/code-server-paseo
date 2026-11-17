@@ -74,6 +74,14 @@ brew's `shellenv` prepends itself to `PATH`, so `pi` resolves to the brew copy a
 you get silent version skew. Uninstall it there (`brew uninstall pi-coding-agent`) and
 let the image own it.
 
+**The image runs as root.** The base image ends at `USER 1000` (`coder`), but the
+install steps here need root and nothing resets it, so code-server and the Paseo
+daemon run as uid 0. That predates this repo's shell setup and is tracked
+separately: switching to `USER coder` is a visible change for anyone whose
+bind-mounted volumes are already root-owned. Both users' login shells are set to
+fish so the terminal is the same either way, and `DOCKER_USER` (which renames
+`coder`) keeps the shell it has.
+
 ## Shell: fish + starship
 
 A fresh terminal in the workspace is fish with the starship prompt. Four levers make
@@ -82,7 +90,7 @@ that true, and `scripts/smoke_test.sh` asserts each one:
 | Lever | Where | Why it is needed |
 | --- | --- | --- |
 | `fish`, `starship` installed | apt, Ubuntu archive | the binaries |
-| `coder`'s login shell is `/usr/bin/fish` | `usermod` in the Dockerfile | code-server takes the default terminal from the login shell and lists profiles from `/etc/shells`; both live in the image, so a volume over `$HOME` cannot hide them |
+| The login shell of `coder` **and** `root` is `/usr/bin/fish` | `usermod` in the Dockerfile | code-server takes the default terminal from the login shell and lists profiles from `/etc/shells`; both live in the image, so a volume over `$HOME` cannot hide them. Both users because the runtime user is unsettled — see the gotcha below |
 | `ENV SHELL=/usr/bin/fish` | the Dockerfile | the base image sets no `SHELL` at all, so anything that resolves a shell from the environment falls back to bash |
 | `starship init fish \| source` | `/etc/fish/conf.d/starship.fish` | system-wide drop-in, read before `~/.config/fish/config.fish`, so your own config still gets the last word |
 | `terminal.integrated.defaultProfile.linux` | written at first boot by [entrypoint.d/91-fish-default](entrypoint.d/91-fish-default) | the IDE's own setting wins over everything above, so it is seeded **only when absent** — a default profile you chose yourself is never overwritten |

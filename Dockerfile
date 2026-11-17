@@ -92,9 +92,16 @@ RUN set -eux; \
     # code-server chooses the default terminal from the login shell and lists
     # profiles from /etc/shells, so the passwd entry is the lever that survives
     # a volume mounted over $HOME (see the README quick start).
+    #
+    # Both users, because the runtime user is not settled: USER root below is
+    # what the image actually runs as today (see the note at the end of this
+    # file), and coder is the one Coder's DOCKER_USER path and `su - coder`
+    # reach. Tracked as follow-up work, not fixed here.
     grep -qx /usr/bin/fish /etc/shells || echo /usr/bin/fish >> /etc/shells; \
     usermod -s /usr/bin/fish coder; \
-    getent passwd coder | cut -d: -f7 | grep -qx /usr/bin/fish
+    usermod -s /usr/bin/fish root; \
+    getent passwd coder | cut -d: -f7 | grep -qx /usr/bin/fish; \
+    getent passwd root | cut -d: -f7 | grep -qx /usr/bin/fish
 
 # The base image sets no SHELL at all, so anything that resolves a shell from the
 # environment — code-server's terminal and tasks, Paseo's terminals — falls back
@@ -151,4 +158,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
     CMD ["/usr/local/bin/paseo-healthcheck"]
 
 # Base image ENTRYPOINT (/usr/bin/entrypoint.sh: fixuid, entrypoint.d hooks,
-# then exec dumb-init /usr/bin/code-server) and USER coder are kept as-is.
+# then exec dumb-init /usr/bin/code-server) is kept as-is.
+#
+# USER is not: the base image ends at USER 1000 (coder), but the install steps
+# above need root and nothing resets it, so this image runs its IDE as root. That
+# predates the fish setup and changing it is a visible behaviour change for anyone
+# whose mounted volumes are already root-owned, so it is left alone here and
+# tracked separately rather than slipped into a shell change.
