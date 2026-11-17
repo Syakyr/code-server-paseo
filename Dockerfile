@@ -94,7 +94,7 @@ RUN set -eux; \
     # a volume mounted over $HOME (see the README quick start).
     grep -qx /usr/bin/fish /etc/shells || echo /usr/bin/fish >> /etc/shells; \
     usermod -s /usr/bin/fish coder; \
-    test "$$(getent passwd coder | cut -d: -f7)" = /usr/bin/fish
+    getent passwd coder | cut -d: -f7 | grep -qx /usr/bin/fish
 
 # The base image sets no SHELL at all, so anything that resolves a shell from the
 # environment — code-server's terminal and tasks, Paseo's terminals — falls back
