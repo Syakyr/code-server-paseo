@@ -33,6 +33,47 @@ command -v paseo >/dev/null 2>&1 || warn "paseo is not on PATH"
 home="${PASEO_HOME:-${HOME}/.paseo}"
 mkdir -p "${home}" 2>/dev/null || warn "cannot create PASEO_HOME ${home}"
 
+# A home volume carried over from an earlier container brings its paseo.pid with
+# it, and Paseo's own staleness test cannot see that. It compares the lock's
+# bootId against /proc/sys/kernel/random/boot_id, which containers inherit from
+# the host instead of getting per container, so a lock written by a previous
+# container reads as "written during this boot". The pid it names has usually
+# been recycled by then, and a recycled pid looks alive: this bit me with the
+# lock naming a code-server thread, after which `daemon run` reported
+# already_running and exited 0 without binding a port, silently.
+#
+# Whether that pid is a Paseo process is the test that survives PID reuse. An
+# unreadable cmdline is left alone: a lock owned by another uid can be a live
+# daemon sharing this home, and two daemons on one home is worse than none.
+lock="${home}/paseo.pid"
+if [ -f "${lock}" ]; then
+    pid="$(sed -n -E 's/.*"pid":([0-9]+).*/\1/p' "${lock}")"
+    case "${pid}" in
+        ''|*[!0-9]*)
+            # Not a lock anyone owns. Paseo refuses to start over an unparseable
+            # record ("Invalid lock shape"), so leaving it in place would mean no
+            # daemon at all; corruption gets dropped.
+            echo "[90-paseo] dropping unreadable lock: no pid field in ${lock}"
+            rm -f "${lock}"
+            ;;
+        *)
+            if [ ! -d "/proc/${pid}" ]; then
+                echo "[90-paseo] dropping stale lock: pid ${pid} is not running"
+                rm -f "${lock}"
+            elif [ ! -r "/proc/${pid}/cmdline" ]; then
+                echo "[90-paseo] WARNING: lock names pid ${pid}, cmdline unreadable; leaving it alone" >&2
+            elif tr '\0' ' ' < "/proc/${pid}/cmdline" | grep -qi paseo; then
+                echo "[90-paseo] pid ${pid} already runs Paseo for ${home}; not launching a second daemon"
+                exit 0
+            else
+                name="$(sed -n 's/^Name:[[:space:]]*//p' "/proc/${pid}/status" 2>/dev/null)"
+                echo "[90-paseo] dropping stale lock: pid ${pid} is ${name:-unknown}, not Paseo"
+                rm -f "${lock}"
+            fi
+            ;;
+    esac
+fi
+
 # stdout is left attached so the daemon's own logs land in `docker logs`.
 nohup paseo daemon run --home "${home}" &
 echo "[90-paseo] paseo daemon launched on ${PASEO_LISTEN} (pid $!)"

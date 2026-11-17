@@ -16,6 +16,7 @@
 #   8. the healthcheck discovers a non-default PASEO_LISTEN port on its own
 #   9. a Paseo failure does not take code-server down with it
 #  10. fish is the default shell and starship owns the prompt
+#  11. a stale pid lock left by an earlier container does not silence the daemon
 set -euo pipefail
 
 IMAGE="${1:?usage: smoke_test.sh <image> [paseo_version] [pi_version]}"
@@ -179,5 +180,24 @@ pass "integrated terminal default seeded at boot"
     grep -q bash "$s"' ||
     fail "91-fish-default overwrote an explicit user choice of default profile"
 pass "an explicit default profile is left alone"
+
+# 11. a stale lock from a previous container ---------------------------------
+# The production failure this guards: a home volume carried over with a
+# paseo.pid whose pid has been recycled. Paseo's own staleness test is bootId
+# then pid, and containers inherit the host's boot_id, so the lock looks fresh
+# while the recycled pid looks alive, and `daemon run` exits 0 having done
+# nothing. Pid 1 is the stand-in: always alive, never Paseo.
+stale="$("$DOCKER" run --rm --entrypoint sh "$IMAGE" -c '
+    home="$HOME/.paseo"
+    mkdir -p "$home"
+    printf %s "{\"pid\":1,\"startedAt\":\"2026-01-01T00:00:00.000Z\",\"listen\":\"127.0.0.1:6767\"}" \
+        > "$home/paseo.pid"
+    /entrypoint.d/90-paseo >/dev/null 2>&1
+    sleep 8
+    curl -sf -m 5 -o /dev/null http://127.0.0.1:6767/api/health && echo HEALTH_OK || echo HEALTH_FAIL')"
+case "$stale" in
+    *HEALTH_OK*) pass "a stale lock is dropped and the daemon still comes up" ;;
+    *) fail "daemon did not start over a stale lock: ${stale}" ;;
+esac
 
 echo "all smoke tests passed"

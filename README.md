@@ -163,6 +163,16 @@ That hook obeys three rules, and all three are load-bearing:
 `scripts/smoke_test.sh` asserts all three, plus that the health probe actually fails
 against a dead endpoint.
 
+A home volume mounted from an earlier container can also arrive holding a
+`paseo.pid`. Paseo decides whether that lock is live from the boot id and then the
+pid, and a container inherits the host's `/proc/sys/kernel/random/boot_id` rather
+than getting its own, so the lock reads as fresh while the pid it names has been
+recycled by something unrelated; `daemon run` then reports `already_running` and
+exits 0 without binding a port. The hook checks `/proc/<pid>/cmdline` and drops the
+lock when that process is not Paseo, and drops a record with no pid at all because
+Paseo itself refuses to start over one. A lock whose cmdline it cannot read is left
+alone, because a second daemon on a shared home is worse than none.
+
 ## Pinning and updates
 
 `Dockerfile` carries all three pins as `ARG`s:
@@ -206,9 +216,10 @@ scripts/smoke_test.sh csp:local 0.16.0
 
 The smoke test boots the container and checks both HTTP servers answer, the health
 probe passes live and fails dead, a non-default `PASEO_LISTEN` is discovered, a
-failing Paseo hook does not take code-server down, and fish is the default shell with
-starship owning the prompt (including that the boot hook does not overwrite an
-explicit default profile).
+failing Paseo hook does not take code-server down, a stale pid lock from an earlier
+container gets dropped rather than silencing the daemon, and fish is the default
+shell with starship owning the prompt (including that the boot hook does not
+overwrite an explicit default profile).
 
 ## License
 
