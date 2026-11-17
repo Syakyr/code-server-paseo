@@ -1,0 +1,65 @@
+#!/bin/sh
+# Make fish the default integrated terminal, without overwriting anyone's choice.
+#
+# The Dockerfile already sets fish as the login shell and as $SHELL. This closes
+# the last gap: code-server only consults those when
+# terminal.integrated.defaultProfile.linux is unset, and that setting is easy to
+# pick up from a synced or copied user settings file.
+#
+# Why a hook and not a settings.json baked into the image: the README quick start
+# bind-mounts a volume over /home/coder, which hides whatever the image wrote to
+# ~/.local/share/code-server. A hook runs after that mount exists.
+#
+# Same two rules as 90-paseo, and for the same reason — the base entrypoint runs
+# hooks under `set -eu` and aborts the container on a non-zero exit:
+#
+#   1. Never block. Nothing here waits.
+#   2. Never exit non-zero. Every failure is a warning; the IDE starts anyway.
+#
+# It only ever adds the key when absent. A user who set their own default profile
+# (or who writes settings.json as JSONC with comments, which this script refuses
+# to parse rather than rewrite) is left exactly as they are.
+set -eu
+
+warn() {
+    echo "[91-fish-default] WARNING: $* — leaving the terminal default alone" >&2
+    exit 0
+}
+
+command -v fish >/dev/null 2>&1 || warn "fish is not on PATH"
+command -v node >/dev/null 2>&1 || warn "node is not on PATH"
+
+# code-server's default user-data dir; override if the IDE is started with
+# --user-data-dir somewhere else.
+user_data_dir="${CODE_SERVER_USER_DATA_DIR:-${HOME}/.local/share/code-server}"
+settings="${user_data_dir}/User/settings.json"
+
+mkdir -p "${user_data_dir}/User" 2>/dev/null || warn "cannot create ${user_data_dir}/User"
+
+CSP_SETTINGS="$settings" node -e '
+const fs = require("fs");
+const path = process.env.CSP_SETTINGS;
+const key = "terminal.integrated.defaultProfile.linux";
+let settings = {};
+try {
+    const raw = fs.readFileSync(path, "utf8").trim();
+    if (raw) {
+        settings = JSON.parse(raw);
+    }
+} catch (err) {
+    if (err.code !== "ENOENT") {
+        // Comments and trailing commas are legal in settings.json and would be
+        // destroyed by a rewrite, so refuse rather than guess.
+        console.error("refusing to rewrite " + path + ": " + err.message);
+        process.exit(1);
+    }
+}
+if (settings[key] === undefined) {
+    settings[key] = "fish";
+    fs.writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+    console.log("[91-fish-default] " + key + "=fish written to " + path);
+} else {
+    console.log("[91-fish-default] " + key + " already set to " +
+        JSON.stringify(settings[key]) + "; leaving it alone");
+}
+' || warn "could not update ${settings}"

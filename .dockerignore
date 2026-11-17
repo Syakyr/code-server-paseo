@@ -1,5 +1,5 @@
-# Everything is COPYed by name (NOTICE, entrypoint.d/, healthcheck); keep the
-# build context free of local state and scratch.
+# Everything is COPYed by name (NOTICE, etc/fish/, entrypoint.d/, healthcheck);
+# keep the build context free of local state and scratch.
 .git
 .github
 .gitignore

@@ -6,13 +6,29 @@ scripts, workflows, documentation) are licensed under the MIT License — see
 LICENSE.
 
 This image installs and redistributes unmodified upstream software. Their
-licenses are listed below; the texts are copied at build time from the trees
-actually present in the image and ship at
-/usr/share/licenses/code-server-paseo/.
+licenses are listed below. The npm components' texts are copied at build time
+from the trees actually present in the image and ship at
+/usr/share/licenses/code-server-paseo/; the apt components carry their own
+machine-readable copyright file from the Ubuntu archive.
 
 --------------------------------------------------------------------------------
 Third-party components shipped in the image
 --------------------------------------------------------------------------------
+
+fish
+  License   Apache-2.0, with a handful of components under other permissive
+            licenses
+  Upstream  https://github.com/fish-shell/fish-shell
+  In image  /usr/bin/fish (apt, from the Ubuntu archive, unmodified)
+  Text      the distribution's own copyright file for the package, and
+            https://github.com/fish-shell/fish-shell/blob/master/COPYING
+
+starship
+  License   MIT or Apache-2.0 (dual)
+  Upstream  https://github.com/starship/starship
+  In image  /usr/bin/starship (apt, from the Ubuntu archive, unmodified)
+  Text      the distribution's own copyright file for the package, and
+            https://github.com/starship/starship/blob/master/LICENSE
 
 code-server
   License   MIT

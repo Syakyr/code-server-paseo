@@ -15,6 +15,7 @@
 #      returns 0 is worse than no probe)
 #   8. the healthcheck discovers a non-default PASEO_LISTEN port on its own
 #   9. a Paseo failure does not take code-server down with it
+#  10. fish is the default shell and starship owns the prompt
 set -euo pipefail
 
 IMAGE="${1:?usage: smoke_test.sh <image> [paseo_version] [pi_version]}"
@@ -133,5 +134,50 @@ wait_http http://127.0.0.1:18080/ 90 ||
 grep -q "90-paseo" "${TMPDIR:-/tmp}/csp-smoke.log" ||
     fail "the paseo hook never ran"
 pass "code-server survives a paseo hook that cannot start the daemon"
+
+# 10. fish + starship --------------------------------------------------------
+# Four separate levers, because the binaries existing is not the same thing as a
+# fresh terminal being fish with starship: the login shell and $SHELL (both set
+# by the build), the prompt (a system-wide fish drop-in), and the IDE default
+# (written at boot by 91-fish-default, since $HOME is usually a volume that hides
+# whatever the image baked into ~/.local/share/code-server).
+"$DOCKER" run --rm --entrypoint sh "$IMAGE" -c \
+    'test -x /usr/bin/fish && test -x /usr/bin/starship' ||
+    fail "fish or starship missing from the image"
+pass "fish and starship installed"
+
+login_shell="$("$DOCKER" run --rm --entrypoint sh "$IMAGE" -c \
+    'getent passwd "$(id -un)" | cut -d: -f7')"
+[ "$login_shell" = /usr/bin/fish ] ||
+    fail "expected the workspace user's login shell to be /usr/bin/fish, got ${login_shell}"
+[ "$("$DOCKER" run --rm --entrypoint sh "$IMAGE" -c 'printf %s "${SHELL:-unset}"')" = /usr/bin/fish ] ||
+    fail 'SHELL is not /usr/bin/fish'
+pass "fish is the login shell and SHELL"
+
+# fish sources its configuration before -c runs the command, so this exercises
+# the real startup path rather than sourcing the drop-in by hand.
+prompt="$("$DOCKER" run --rm --entrypoint fish "$IMAGE" -c 'functions fish_prompt' 2>&1)"
+case "$prompt" in
+    *starship*) pass "starship owns the fish prompt, system-wide" ;;
+    *) fail "fish_prompt does not come from starship: ${prompt}" ;;
+esac
+
+"$DOCKER" run --rm --entrypoint sh "$IMAGE" -c '
+    /entrypoint.d/91-fish-default &&
+    grep -q "terminal.integrated.defaultProfile.linux.*fish" \
+        "$HOME/.local/share/code-server/User/settings.json"' ||
+    fail "91-fish-default did not seed the integrated terminal default"
+pass "integrated terminal default seeded at boot"
+
+# The hook must add the key, never overwrite one. A default profile the operator
+# chose by hand has to survive a container restart.
+"$DOCKER" run --rm --entrypoint sh "$IMAGE" -c '
+    s="$HOME/.local/share/code-server/User/settings.json"
+    mkdir -p "$(dirname "$s")"
+    printf "%s\n" "{\"terminal.integrated.defaultProfile.linux\":\"bash\"}" > "$s"
+    /entrypoint.d/91-fish-default
+    grep -q bash "$s"' ||
+    fail "91-fish-default overwrote an explicit user choice of default profile"
+pass "an explicit default profile is left alone"
 
 echo "all smoke tests passed"

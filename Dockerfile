@@ -73,6 +73,35 @@ ARG PASEO_VERSION
 ARG PI_VERSION
 USER root
 
+# fish as the workspace shell, starship as its prompt.
+#
+# Both come from the Ubuntu archive (resolute ships fish 4.2.1-3.2 and starship
+# 1.22.1-9ubuntu1 in universe) rather than a vendor installer: one packaging
+# path, no download from a third host at build time, and they move with the base
+# image's own channel. The cost is stated plainly: neither is a pin in this file,
+# so their versions are whatever the archive serves on the build day. That is
+# true of any apt layer in any image, and it is the trade for not hand-rolling a
+# checksum-verified multi-arch download.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends fish starship; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*; \
+    fish --version; \
+    starship --version | sed -n 1p; \
+    # code-server chooses the default terminal from the login shell and lists
+    # profiles from /etc/shells, so the passwd entry is the lever that survives
+    # a volume mounted over $HOME (see the README quick start).
+    grep -qx /usr/bin/fish /etc/shells || echo /usr/bin/fish >> /etc/shells; \
+    usermod -s /usr/bin/fish coder; \
+    test "$$(getent passwd coder | cut -d: -f7)" = /usr/bin/fish
+
+# The base image sets no SHELL at all, so anything that resolves a shell from the
+# environment — code-server's terminal and tasks, Paseo's terminals — falls back
+# to bash. Non-interactive tooling is unaffected: npm runs /bin/sh, and the agent
+# CLIs invoke bash directly rather than $SHELL.
+ENV SHELL=/usr/bin/fish
+
 # /opt/paseo is self-contained (npm's bin symlinks are relative), so it lives
 # outside code-server's own trees. `node` on PATH is what the `paseo` shebang
 # (`/usr/bin/env -S node --disable-warning=DEP0040`) resolves, and code-server's
@@ -91,7 +120,9 @@ RUN set -eux; \
 # License texts come from the trees already in the image rather than vendored
 # copies, so they cannot drift from what is actually shipped.
 COPY NOTICE /usr/share/licenses/code-server-paseo/NOTICE
+COPY etc/fish/conf.d/starship.fish /etc/fish/conf.d/starship.fish
 COPY entrypoint.d/90-paseo /entrypoint.d/90-paseo
+COPY entrypoint.d/91-fish-default /entrypoint.d/91-fish-default
 COPY healthcheck /usr/local/bin/paseo-healthcheck
 RUN set -eux; \
     dest=/usr/share/licenses/code-server-paseo; \
@@ -105,7 +136,9 @@ RUN set -eux; \
     # so record the declaration rather than inventing a text.
     grep -q '"license": *"MIT"' \
       /opt/pi/lib/node_modules/@earendil-works/pi-coding-agent/package.json; \
-    chmod 0755 /entrypoint.d/90-paseo /usr/local/bin/paseo-healthcheck; \
+    chmod 0755 /entrypoint.d/90-paseo /entrypoint.d/91-fish-default \
+      /usr/local/bin/paseo-healthcheck; \
+    test -s /etc/fish/conf.d/starship.fish; \
     ls -l /entrypoint.d/
 
 # Loopback by default: reachable from inside the workspace (Coder's coder_app,

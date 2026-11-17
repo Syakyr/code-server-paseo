@@ -2,8 +2,9 @@
 
 [`code-server`](https://github.com/coder/code-server) (VS Code in the browser) with the
 [`Paseo`](https://github.com/getpaseo/paseo) daemon and the [`pi`](https://github.com/earendil-works/pi)
-coding agent installed on top, Paseo started by the image's own startup hook. One
-container, one `$HOME`, one glibc.
+coding agent installed on top, Paseo started by the image's own startup hook, and
+fish + starship as the shell every terminal opens. One container, one `$HOME`, one
+glibc.
 
 ```
 ghcr.io/syakyr/code-server-paseo:latest
@@ -72,6 +73,35 @@ If your mounted brew tree also has pi, **it shadows the image one in login shell
 brew's `shellenv` prepends itself to `PATH`, so `pi` resolves to the brew copy and
 you get silent version skew. Uninstall it there (`brew uninstall pi-coding-agent`) and
 let the image own it.
+
+## Shell: fish + starship
+
+A fresh terminal in the workspace is fish with the starship prompt. Four levers make
+that true, and `scripts/smoke_test.sh` asserts each one:
+
+| Lever | Where | Why it is needed |
+| --- | --- | --- |
+| `fish`, `starship` installed | apt, Ubuntu archive | the binaries |
+| `coder`'s login shell is `/usr/bin/fish` | `usermod` in the Dockerfile | code-server takes the default terminal from the login shell and lists profiles from `/etc/shells`; both live in the image, so a volume over `$HOME` cannot hide them |
+| `ENV SHELL=/usr/bin/fish` | the Dockerfile | the base image sets no `SHELL` at all, so anything that resolves a shell from the environment falls back to bash |
+| `starship init fish \| source` | `/etc/fish/conf.d/starship.fish` | system-wide drop-in, read before `~/.config/fish/config.fish`, so your own config still gets the last word |
+| `terminal.integrated.defaultProfile.linux` | written at first boot by [entrypoint.d/91-fish-default](entrypoint.d/91-fish-default) | the IDE's own setting wins over everything above, so it is seeded **only when absent** — a default profile you chose yourself is never overwritten |
+
+Two things this deliberately does not do:
+
+- **It does not pin fish or starship.** They come from the Ubuntu archive with the
+  base image (resolute ships `fish 4.2.1-3.2` and `starship 1.22.1-9ubuntu1` in
+  universe), so they move with the distro's channel rather than with a watched
+  `ARG`. The alternative — a checksum-verified download from GitHub for one of the
+  two, while the other can only come from apt — buys a newer starship and a second
+  packaging path.
+- **It does not remove bash.** `bash` is still there and still what `#!/bin/bash`
+  scripts and `docker exec` invocations get. `$SHELL` is only consulted by things
+  that deliberately resolve a user shell: npm runs `/bin/sh`, and the agent CLIs
+  invoke bash directly.
+
+To go the other way for one user, set `terminal.integrated.defaultProfile.linux` in
+your user settings; the boot hook will leave it alone from then on.
 
 ## Tags
 
@@ -142,6 +172,10 @@ of `codercom/code-server:resolute`, commits any pin bump, probes GHCR for the pa
 tag, and dispatches a build when the image is missing. Every upstream is part of the
 pairing tag, so a bump in any one of them rebuilds rather than looking already built.
 
+fish and starship are not pins and are not in the pairing tag — see
+[Shell: fish + starship](#shell-fish--starship). A change to the shell setup lands
+with the next build from `main`, which republishes `latest`.
+
 Every published pairing also gets a [GitHub
 release](../../releases) named after it, with what moved since the previous one —
 whether that was Paseo, the code-server base, or neither. The release list is the
@@ -163,12 +197,15 @@ scripts/smoke_test.sh csp:local 0.16.0
 ```
 
 The smoke test boots the container and checks both HTTP servers answer, the health
-probe passes live and fails dead, a non-default `PASEO_LISTEN` is discovered, and a
-failing Paseo hook does not take code-server down.
+probe passes live and fails dead, a non-default `PASEO_LISTEN` is discovered, a
+failing Paseo hook does not take code-server down, and fish is the default shell with
+starship owning the prompt (including that the boot hook does not overwrite an
+explicit default profile).
 
 ## License
 
 MIT for this repo's own code — see [LICENSE](LICENSE). The image installs unmodified
-upstream software: code-server (MIT) and Paseo (Apache-2.0). Their texts are copied at
+upstream software: code-server (MIT), Paseo (Apache-2.0), and fish (Apache-2.0) and
+starship (MIT or Apache-2.0) from the Ubuntu archive. The npm licenses are copied at
 build time from the trees actually in the image and ship at
 `/usr/share/licenses/code-server-paseo/`; see [NOTICE](NOTICE).
