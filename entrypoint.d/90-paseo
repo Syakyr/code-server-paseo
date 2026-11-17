@@ -42,17 +42,41 @@ mkdir -p "${home}" 2>/dev/null || warn "cannot create PASEO_HOME ${home}"
 # lock naming a code-server thread, after which `daemon run` reported
 # already_running and exited 0 without binding a port, silently.
 #
-# Whether that pid is a Paseo process is the test that survives PID reuse. An
-# unreadable cmdline is left alone: a lock owned by another uid can be a live
-# daemon sharing this home, and two daemons on one home is worse than none.
+# Ordered from what is certain to what is inferred:
+#
+#   no pid field    corruption; Paseo refuses to start over an unparseable record
+#                   ("Invalid lock shape"), so leaving it means no daemon
+#   no such pid     nothing owns the lock
+#   endpoint answers a daemon is live and serving, leave it and launch nothing
+#   argv[0] Paseo    live Paseo that is not listening yet, or is in another
+#                   container sharing this home; argv[0] only, because a command
+#                   line merely mentioning paseo proves nothing (the smoke test's
+#                   own `sh -c` does)
+#   otherwise        the pid was recycled; drop the lock and start
 lock="${home}/paseo.pid"
 if [ -f "${lock}" ]; then
     pid="$(sed -n -E 's/.*"pid":([0-9]+).*/\1/p' "${lock}")"
+    listen="$(sed -n -E 's/.*"listen":"([^"]*)".*/\1/p' "${lock}")"
+    host="${listen%%:*}"
+    port="${listen##*:}"
+    [ "${host}" = "${listen}" ] && host=""
+    [ "${host}" = "0.0.0.0" ] && host="127.0.0.1"
+
+    # Zero when something accepts a connection on the recorded endpoint.
+    endpoint_answers() {
+        case "${port}" in ''|*[!0-9]*) return 1 ;; esac
+        CSP_HOST="${host:-127.0.0.1}" CSP_PORT="${port}" node -e '
+const net = require("net");
+const sock = net.connect({ host: process.env.CSP_HOST, port: Number(process.env.CSP_PORT) });
+sock.setTimeout(1000);
+sock.on("connect", () => process.exit(0));
+sock.on("error", () => process.exit(1));
+sock.on("timeout", () => { sock.destroy(); process.exit(1); });
+' >/dev/null 2>&1
+    }
+
     case "${pid}" in
         ''|*[!0-9]*)
-            # Not a lock anyone owns. Paseo refuses to start over an unparseable
-            # record ("Invalid lock shape"), so leaving it in place would mean no
-            # daemon at all; corruption gets dropped.
             echo "[90-paseo] dropping unreadable lock: no pid field in ${lock}"
             rm -f "${lock}"
             ;;
@@ -60,9 +84,10 @@ if [ -f "${lock}" ]; then
             if [ ! -d "/proc/${pid}" ]; then
                 echo "[90-paseo] dropping stale lock: pid ${pid} is not running"
                 rm -f "${lock}"
-            elif [ ! -r "/proc/${pid}/cmdline" ]; then
-                echo "[90-paseo] WARNING: lock names pid ${pid}, cmdline unreadable; leaving it alone" >&2
-            elif tr '\0' ' ' < "/proc/${pid}/cmdline" | grep -qi paseo; then
+            elif endpoint_answers; then
+                echo "[90-paseo] a daemon already answers on ${listen}; not launching a second one"
+                exit 0
+            elif tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | cut -d' ' -f1-2 | grep -qi paseo; then
                 echo "[90-paseo] pid ${pid} already runs Paseo for ${home}; not launching a second daemon"
                 exit 0
             else

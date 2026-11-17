@@ -192,9 +192,17 @@ stale="$("$DOCKER" run --rm --entrypoint sh "$IMAGE" -c '
     mkdir -p "$home"
     printf %s "{\"pid\":1,\"startedAt\":\"2026-01-01T00:00:00.000Z\",\"listen\":\"127.0.0.1:6767\"}" \
         > "$home/paseo.pid"
-    /entrypoint.d/90-paseo >/dev/null 2>&1
-    sleep 8
-    curl -sf -m 5 -o /dev/null http://127.0.0.1:6767/api/health && echo HEALTH_OK || echo HEALTH_FAIL')"
+    /entrypoint.d/90-paseo > /tmp/hook.log 2>&1
+    i=0
+    while [ "$i" -lt 30 ]; do
+        curl -sf -m 3 -o /dev/null http://127.0.0.1:6767/api/health && break
+        i=$((i + 1)); sleep 1
+    done
+    if curl -sf -m 5 -o /dev/null http://127.0.0.1:6767/api/health; then
+        echo HEALTH_OK
+    else
+        echo HEALTH_FAIL; sed -n 1,20p /tmp/hook.log
+    fi')"
 case "$stale" in
     *HEALTH_OK*) pass "a stale lock is dropped and the daemon still comes up" ;;
     *) fail "daemon did not start over a stale lock: ${stale}" ;;
