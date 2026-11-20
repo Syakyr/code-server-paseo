@@ -25,7 +25,7 @@ ARG PASEO_VERSION=0.16.2
 # pi is baked in so a fresh device gets a working agent without a Linuxbrew
 # tree, and so the version is pinned and watched rather than whatever brew
 # happens to have. Same package pi-image installs.
-ARG PI_VERSION=1.5.2
+ARG PI_VERSION=1.6.0
 
 ARG CODE_SERVER_IMAGE=codercom/code-server
 ARG CODE_SERVER_TAG=resolute
