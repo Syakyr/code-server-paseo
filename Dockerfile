@@ -32,7 +32,7 @@ ARG CODE_SERVER_TAG=resolute
 # Digest of the multi-arch index that CODE_SERVER_TAG pointed at when this pin
 # was written. Bumped by .github/workflows/watch.yml; a published image tag
 # therefore always names one reproducible base.
-ARG CODE_SERVER_DIGEST=sha256:e63d49eee8a142443227642faeaf63b61ced12916a611695dbf7250d275afe62
+ARG CODE_SERVER_DIGEST=sha256:5afbcc968ff1ca275c7058924ea950d1ede9780734b204b907aa8f229f7c23e3
 # Every ARG used in a FROM line must be declared before the first FROM: an ARG
 # declared after one is stage-scoped, and a blank base name is the failure.
 ARG CODE_SERVER_REF=${CODE_SERVER_IMAGE}@${CODE_SERVER_DIGEST}
