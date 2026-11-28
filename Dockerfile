@@ -20,12 +20,12 @@
 
 # Pinned by .github/workflows/watch.yml to the newest @getpaseo/cli release.
 # Global so both stages see one source of truth.
-ARG PASEO_VERSION=0.18.0
+ARG PASEO_VERSION=0.18.1
 
 # pi is baked in so a fresh device gets a working agent without a Linuxbrew
 # tree, and so the version is pinned and watched rather than whatever brew
 # happens to have. Same package pi-image installs.
-ARG PI_VERSION=1.6.1
+ARG PI_VERSION=1.7.0
 
 ARG CODE_SERVER_IMAGE=codercom/code-server
 ARG CODE_SERVER_TAG=resolute
